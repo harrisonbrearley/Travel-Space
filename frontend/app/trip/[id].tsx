@@ -1,0 +1,196 @@
+import React from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  Pressable,
+  Animated,
+  Dimensions,
+} from "react-native";
+import { Image } from "expo-image";
+import { LinearGradient } from "expo-linear-gradient";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useQuery } from "@tanstack/react-query";
+import Icon from "@react-native-vector-icons/material-design-icons";
+
+import { api, type Trip } from "@/src/api";
+import { colors, radius, spacing } from "@/src/theme";
+import { niceDate } from "@/src/components/form";
+
+import ItineraryTab from "@/src/components/tabs/Itinerary";
+import FlightsTab from "@/src/components/tabs/Flights";
+import TransportTab from "@/src/components/tabs/Transport";
+import StaysTab from "@/src/components/tabs/Stays";
+import AttractionsTab from "@/src/components/tabs/Attractions";
+import TicketsTab from "@/src/components/tabs/Tickets";
+import BudgetTab from "@/src/components/tabs/Budget";
+
+const TABS = [
+  { key: "itinerary", label: "Itinerary", icon: "calendar-blank-outline" },
+  { key: "flights", label: "Flights", icon: "airplane" },
+  { key: "transport", label: "Transport", icon: "car" },
+  { key: "stays", label: "Stay", icon: "bed-outline" },
+  { key: "attractions", label: "Attractions", icon: "map-marker-outline" },
+  { key: "tickets", label: "Tickets", icon: "ticket-outline" },
+  { key: "budget", label: "Budget", icon: "cash-multiple" },
+] as const;
+
+const PLACEHOLDER =
+  "https://images.unsplash.com/photo-1624253321171-1be53e12f5f4?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxOTB8MHwxfHNlYXJjaHwxfHxLeW90byUyMEphcGFuJTIwdGVtcGxlJTIwdHJhdmVsJTIwcGhvdG9ncmFwaHl8ZW58MHx8fHwxNzg5MzcyOTMyfDA&ixlib=rb-4.1.0&q=85";
+
+export default function TripDetailScreen() {
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const [tab, setTab] = React.useState<(typeof TABS)[number]["key"]>("itinerary");
+
+  const { data: trip } = useQuery<Trip>({
+    queryKey: ["trip", id],
+    queryFn: () => api.getTrip(id),
+  });
+
+  if (!trip) {
+    return (
+      <View style={[s.root, { paddingTop: insets.top }]}>
+        <View style={s.topBar}>
+          <Pressable onPress={() => router.back()} style={s.iconBtn} testID="back-btn">
+            <Icon name="chevron-left" size={26} color="#fff" />
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
+  const dateRange =
+    trip.start_date && trip.end_date
+      ? `${niceDate(trip.start_date)} – ${niceDate(trip.end_date)}`
+      : "Dates to be planned";
+
+  return (
+    <View style={s.root}>
+      {/* Cover header */}
+      <View style={s.cover}>
+        <Image
+          source={{ uri: trip.cover_photo || PLACEHOLDER }}
+          style={StyleSheet.absoluteFill}
+          contentFit="cover"
+        />
+        <LinearGradient
+          colors={["rgba(0,0,0,0.35)", "transparent", "rgba(0,0,0,0.85)"]}
+          locations={[0, 0.4, 1]}
+          style={StyleSheet.absoluteFillObject}
+        />
+        <View style={[s.topBar, { paddingTop: insets.top + spacing.sm }]}>
+          <Pressable onPress={() => router.back()} style={s.iconBtn} testID="back-btn">
+            <Icon name="chevron-left" size={26} color="#fff" />
+          </Pressable>
+          <Pressable
+            onPress={() => router.push({ pathname: "/trip/edit", params: { id: trip.id } })}
+            style={s.iconBtn}
+            testID="edit-trip-btn"
+          >
+            <Icon name="pencil-outline" size={22} color="#fff" />
+          </Pressable>
+        </View>
+        <View style={s.coverBottom}>
+          <Text style={s.coverTitle} numberOfLines={2}>{trip.name}</Text>
+          {!!trip.destination && <Text style={s.coverDest}>{trip.destination}</Text>}
+          <Text style={s.coverDates}>{dateRange}</Text>
+        </View>
+      </View>
+
+      {/* Tabs bar */}
+      <View style={s.tabsWrap}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ paddingHorizontal: spacing.lg, gap: spacing.sm, alignItems: "center" }}
+        >
+          {TABS.map((t) => {
+            const active = t.key === tab;
+            return (
+              <Pressable
+                key={t.key}
+                testID={`tab-${t.key}`}
+                onPress={() => setTab(t.key)}
+                style={[s.tabChip, active && s.tabChipActive]}
+              >
+                <Icon
+                  name={t.icon as any}
+                  size={16}
+                  color={active ? colors.onBrandPrimary : colors.onSurface}
+                />
+                <Text style={[s.tabText, active && s.tabTextActive]}>{t.label}</Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </View>
+
+      {/* Tab content */}
+      <View style={{ flex: 1 }}>
+        {tab === "itinerary" && <ItineraryTab trip={trip} />}
+        {tab === "flights" && <FlightsTab trip={trip} />}
+        {tab === "transport" && <TransportTab trip={trip} />}
+        {tab === "stays" && <StaysTab trip={trip} />}
+        {tab === "attractions" && <AttractionsTab trip={trip} />}
+        {tab === "tickets" && <TicketsTab trip={trip} />}
+        {tab === "budget" && <BudgetTab trip={trip} />}
+      </View>
+    </View>
+  );
+}
+
+const s = StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.surface },
+  cover: {
+    height: 260,
+    backgroundColor: colors.surfaceInverse,
+  },
+  topBar: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.md,
+  },
+  iconBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(0,0,0,0.35)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  coverBottom: {
+    position: "absolute",
+    left: spacing.lg,
+    right: spacing.lg,
+    bottom: spacing.lg,
+  },
+  coverTitle: { color: "#fff", fontSize: 28, fontWeight: "700", letterSpacing: -0.4 },
+  coverDest: { color: "rgba(255,255,255,0.9)", fontSize: 15, marginTop: 4 },
+  coverDates: { color: "rgba(255,255,255,0.75)", fontSize: 13, marginTop: 6 },
+  tabsWrap: {
+    height: 56,
+    justifyContent: "center",
+    backgroundColor: colors.surface,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  tabChip: {
+    height: 36,
+    flexShrink: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surfaceTertiary,
+    borderWidth: 1,
+    borderColor: "transparent",
+  },
+  tabChipActive: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
+  tabText: { fontSize: 13, color: colors.onSurface, fontWeight: "500" },
+  tabTextActive: { color: colors.onBrandPrimary, fontWeight: "600" },
+});

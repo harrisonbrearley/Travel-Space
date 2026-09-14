@@ -1,0 +1,172 @@
+{
+  "app_name": "WanderPlan",
+  "personality": "1 iOS-Native Clean",
+  "personality_one_liner": "A calm, highly functional travel companion built on soft warm neutrals, crisp typography, and cinematic travel imagery.",
+  "color": {
+    "surface": "#F9F8F6",
+    "onSurface": "#1C1C1E",
+    "surfaceSecondary": "#FFFFFF",
+    "onSurfaceSecondary": "#1C1C1E",
+    "surfaceTertiary": "#F2EFEA",
+    "onSurfaceTertiary": "#1C1C1E",
+    "surfaceInverse": "#1C1C1E",
+    "onSurfaceInverse": "#FFFFFF",
+    "brand": "#788B76",
+    "onBrand": "#FFFFFF",
+    "brandPrimary": "#788B76",
+    "onBrandPrimary": "#FFFFFF",
+    "brandSecondary": "#9DAF9B",
+    "onBrandSecondary": "#FFFFFF",
+    "brandTertiary": "#E6EBE5",
+    "onBrandTertiary": "#3E4C3D",
+    "success": "#54805A",
+    "onSuccess": "#FFFFFF",
+    "warning": "#C78C44",
+    "onWarning": "#FFFFFF",
+    "error": "#B34E43",
+    "onError": "#FFFFFF",
+    "info": "#788B76",
+    "onInfo": "#FFFFFF",
+    "border": "#E8E4DF",
+    "borderStrong": "#C2BEB8",
+    "divider": "#E8E4DF",
+    "muted": "#8E8A85"
+  },
+  "typography": {
+    "displayFontFamily": "Geist",
+    "textFontFamily": "Geist",
+    "scale": {
+      "sm": 12,
+      "base": 14,
+      "lg": 16,
+      "xl": 20,
+      "2xl": 24
+    }
+  },
+  "spacing": {
+    "rule": "Generous vertical breathing room for reading itineraries. Do not cram data.",
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "2xl": 32,
+    "3xl": 48
+  },
+  "radius_tokens": {
+    "sm": 6,
+    "md": 12,
+    "lg": 20,
+    "pill": 999
+  },
+  "shadow_tier": "1",
+  "navigation": "stack_only",
+  "icon_set": "Phosphor",
+  "glassmorphism": {
+    "enabled": "true",
+    "do's": [
+      "Use blur on floating tabs over scrolling content.",
+      "Use heavy scrim and blur behind Trip titles overlaying cover photos.",
+      "Use glassmorphism for floating action buttons."
+    ],
+    "dont's": [
+      "Do not blur individual itinerary item cards.",
+      "Do not stack blurs over each other."
+    ]
+  },
+  "platform_libraries": {
+    "glass": {
+      "ios": "expo-glass-effect",
+      "android": "expo-blur",
+      "low_end_android_fallback": "solid surfaceSecondary"
+    },
+    "image": "expo-image",
+    "blur": "expo-blur",
+    "bottom_sheet": "@gorhom/bottom-sheet",
+    "animation": "react-native-reanimated",
+    "gesture": "react-native-gesture-handler"
+  },
+  "screens": [
+    {
+      "name": "Home",
+      "purpose": "List user's trips categorized into Upcoming, Past, and Wishlist.",
+      "states": {
+        "loading": "Skeleton cards representing trip images.",
+        "empty": "Empty luggage illustration with 'Plan your next escape' message.",
+        "error": "Failed to load trips. Retry."
+      },
+      "layout": "Header with 'My Trips'. A custom pill-shaped segmented control for 'Upcoming/Past/Wishlist'. Vertical list of edge-to-edge or large md-margin cards. Each card is a hero image of the destination with gradient scrim and title (e.g., 'Paris Getaway') anchored to the bottom. FAB at bottom right to 'Create Trip'."
+    },
+    {
+      "name": "TripDetail",
+      "purpose": "Hub screen for a specific trip containing all sub-tabs.",
+      "states": {
+        "loading": "Skeleton layout for header and tab content.",
+        "empty": "N/A - Sub-tabs handle empty states.",
+        "error": "Failed to load trip data."
+      },
+      "layout": "Collapsible image header (full bleed) showing trip cover photo. Trip name over a top-to-bottom dark gradient scrim. Below header: A horizontal scrollable strip of tabs (Itinerary [Default], Flights, Transport, Stay, Attractions, Tickets, Budget). Active tab uses 'brandPrimary' indicator. Below tabs: The active tab's content."
+    },
+    {
+      "name": "ItineraryTab",
+      "purpose": "Auto-generated day-by-day calendar with chronological items.",
+      "states": {
+        "loading": "Spinning loader.",
+        "empty": "No items added yet. Add flights or stays to build your itinerary.",
+        "error": "Error building itinerary."
+      },
+      "layout": "Top section: horizontal scroll of filter checkboxes (Flights, Stay, Attractions). Main content: Vertical timeline with distinct Day/Date sticky headers. Individual items shown as cards connecting to the timeline, featuring legible typography for times and simple intuitive Phosphor icons."
+    },
+    {
+      "name": "BudgetTab",
+      "purpose": "Track planned vs actual expenses without spreadsheet anxiety.",
+      "states": {
+        "loading": "Spinner.",
+        "empty": "No expenses logged.",
+        "error": "Error loading budget."
+      },
+      "layout": "Hero card at the top displaying 'Total Planned' vs 'Total Spent' using a clean progress bar or simple ring, avoiding dense grids. Below: Vertical list of category breakdowns (Flights, Stay, etc.) showing cost subtotals."
+    },
+    {
+      "name": "CategoryTabs (Flights, Transport, Stay, Attractions)",
+      "purpose": "Dedicated lists and forms for specific booking types.",
+      "states": {
+        "loading": "List skeleton.",
+        "empty": "Empty state illustration of a boarding pass/ticket with CTA to add item.",
+        "error": "Failed to load category data."
+      },
+      "layout": "Vertical stacked lists of cards. Each card shows key data (e.g., Flight time/duration/layover) in a linear story format. Includes a clear 'Status' badge (Booked, Not Booked, Pay on Arrival). FAB to add a new item."
+    }
+  ],
+  "images": {
+    "trip_kyoto": {
+      "url": "https://images.unsplash.com/photo-1624253321171-1be53e12f5f4?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxOTB8MHwxfHNlYXJjaHwxfHxLeW90byUyMEphcGFuJTIwdGVtcGxlJTIwdHJhdmVsJTIwcGhvdG9ncmFwaHl8ZW58MHx8fHwxNzg5MzcyOTMyfDA&ixlib=rb-4.1.0&q=85",
+      "alt": "A traditional pagoda rising above a narrow street in Kyoto, Japan, at golden hour"
+    },
+    "trip_paris": {
+      "url": "https://images.unsplash.com/photo-1511739001486-6bfe10ce785f?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzF8MHwxfHNlYXJjaHwxfHxQYXJpcyUyMEVpZmZlbCUyMHRvd2VyJTIwdHJhdmVsJTIwcGhvdG9ncmFwaHl8ZW58MHx8fHwxNzg5MzcyOTMyfDA&ixlib=rb-4.1.0&q=85",
+      "alt": "Eiffel tower during daytime"
+    },
+    "trip_bali": {
+      "url": "https://images.unsplash.com/photo-1589632732202-bd154e6e116d?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzZ8MHwxfHNlYXJjaHwxfHxCYWxpJTIwYmVhY2glMjByZXNvcnQlMjB0cmF2ZWwlMjBwaG90b2dyYXBoeXxlbnwwfHx8fDE3ODkzNzI5MzJ8MA&ixlib=rb-4.1.0&q=85",
+      "alt": "green trees near body of water during daytime"
+    },
+    "empty_luggage": {
+      "url": "https://images.unsplash.com/photo-1708403120467-1715bb6840df?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA0MTJ8MHwxfHNlYXJjaHwxfHxlbXB0eSUyMGx1Z2dhZ2UlMjB3YWl0aW5nJTIwdHJhdmVsJTIwaWxsdXN0cmF0aW9ufGVufDB8fHx8MTc4OTM3MjkzN3ww&ixlib=rb-4.1.0&q=85",
+      "alt": "a piece of luggage sitting in an airport"
+    },
+    "empty_ticket": {
+      "url": "https://images.unsplash.com/photo-1581553672347-95d9444c0d2c?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1ODF8MHwxfHNlYXJjaHwxfHxib2FyZGluZyUyMHBhc3MlMjBmbGlnaHQlMjB0aWNrZXQlMjBkb2N1bWVudCUyMG9uJTIwdGFibGV8ZW58MHx8fHwxNzg5MzcyOTM3fDA&ixlib=rb-4.1.0&q=85",
+      "alt": "white and blue identification card, passport, and camera on desk"
+    }
+  },
+  "instructions_to_main_agent": [
+    "Follow 1 iOS-Native Clean. Maintain generous padding and use Geist for all UI text to ensure high legibility of times/dates.",
+    "Implement a hub-and-spoke model for TripDetail: The header stays at the top, a horizontal ScrollView of tabs sits just below it, and the content swaps out based on selection to avoid ping-pong navigation.",
+    "All hero images must have a 3-stop vertical gradient scrim (transparent -> 20% dark -> 70% dark) to ensure the white trip names are readable.",
+    "For the Itinerary tab, use a vertical timeline. Keep the timeline visual clear and separate the time headers from the card content. Implement a top horizontal scroll for checkboxes allowing users to toggle categories on/off.",
+    "Budget should avoid dense grids; rely on a clean hero card for total budget, and simple vertical list for categories.",
+    "Data entry forms (e.g. flight layovers, dates) must use native components and clearly structure inputs in a single column layout.",
+    "All bookings must include a status selection UI (Booked, Not Booked, Pay on Arrival)."
+  ]
+}
