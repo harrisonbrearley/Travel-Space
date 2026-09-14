@@ -36,7 +36,8 @@ const buildHtml = (points: Point[]) => `
 <div id="map"></div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-  const pts = ${JSON.stringify(points)};
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  const pts = ${JSON.stringify(points).replace(/</g, "\\u003c")};
   const map = L.map('map');
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OSM' }).addTo(map);
   if (pts.length === 0) { map.setView([20, 0], 2); }
@@ -44,7 +45,7 @@ const buildHtml = (points: Point[]) => `
     const latlngs = pts.map(p => [p.lat, p.lng]);
     pts.forEach((p, i) => {
       const icon = L.divIcon({ className: '', html: '<div class="num-icon">' + (i + 1) + '</div>', iconSize: [28, 28], iconAnchor: [14, 14] });
-      L.marker([p.lat, p.lng], { icon }).addTo(map).bindPopup('<b>' + p.label + '</b>' + (p.sub ? '<br/>' + p.sub : '') + (p.when ? '<br/><small>' + p.when + '</small>' : ''));
+      L.marker([p.lat, p.lng], { icon }).addTo(map).bindPopup('<b>' + esc(p.label) + '</b>' + (p.sub ? '<br/>' + esc(p.sub) : '') + (p.when ? '<br/><small>' + esc(p.when) + '</small>' : ''));
     });
     if (latlngs.length > 1) { L.polyline(latlngs, { color: '#788B76', weight: 3, opacity: 0.75, dashArray: '6 8' }).addTo(map); }
     if (latlngs.length === 1) map.setView(latlngs[0], 12);

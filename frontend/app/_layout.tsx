@@ -1,6 +1,7 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { Stack } from "expo-router";
-import { LogBox } from "react-native";
+import { Stack, useRouter, useSegments } from "expo-router";
+import React from "react";
+import { ActivityIndicator, LogBox, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
@@ -8,11 +9,42 @@ import Icon from "@react-native-vector-icons/material-design-icons";
 
 import { ErrorBoundary } from "@/src/components/error-boundary";
 import { queryClient } from "@/src/query-client";
+import { AuthProvider, useAuth } from "@/src/auth";
+import { colors } from "@/src/theme";
 
-// Prewarm icon font so it renders on first mount in Expo Go
+// Prewarm icon font
 Icon.getImageSource("home", 16, "#000").catch(() => {});
 
 LogBox.ignoreAllLogs(true);
+
+function AuthGate({ children }: { children: React.ReactNode }) {
+  const { loading, user, isLocal } = useAuth();
+  const segments = useSegments();
+  const router = useRouter();
+
+  const inPublic = segments[0] === "share" || segments[0] === "invite";
+  const onLogin = segments[0] === "login";
+  const authed = !!user || isLocal;
+
+  React.useEffect(() => {
+    if (loading) return;
+    if (inPublic) return;
+    if (!authed && !onLogin) {
+      router.replace("/login");
+    } else if (authed && onLogin) {
+      router.replace("/");
+    }
+  }, [loading, authed, inPublic, onLogin, router]);
+
+  if (loading) {
+    return (
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: colors.surface }}>
+        <ActivityIndicator color={colors.brandPrimary} />
+      </View>
+    );
+  }
+  return <>{children}</>;
+}
 
 export default function RootLayout() {
   return (
@@ -21,7 +53,11 @@ export default function RootLayout() {
         <SafeAreaProvider>
           <QueryClientProvider client={queryClient}>
             <StatusBar style="dark" />
-            <Stack screenOptions={{ headerShown: false, animation: "slide_from_right" }} />
+            <AuthProvider>
+              <AuthGate>
+                <Stack screenOptions={{ headerShown: false, animation: "slide_from_right" }} />
+              </AuthGate>
+            </AuthProvider>
           </QueryClientProvider>
         </SafeAreaProvider>
       </GestureHandlerRootView>

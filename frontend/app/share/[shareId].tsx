@@ -113,11 +113,12 @@ export default function PublicSharePage() {
 <style>html,body,#map{height:100%;margin:0;padding:0}.n{background:#788B76;color:#fff;font-weight:700;border-radius:999px;width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-family:-apple-system,sans-serif;font-size:12px;box-shadow:0 2px 6px rgba(0,0,0,.3)}</style></head>
 <body><div id="map"></div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script>
-var pts=${JSON.stringify(mapPoints)};var m=L.map('map');
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+var pts=${JSON.stringify(mapPoints).replace(/</g, "\\u003c")};var m=L.map('map');
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OSM'}).addTo(m);
 if(pts.length===0){m.setView([20,0],2);} else{
   var lls=pts.map(function(p){return [p.lat,p.lng]});
-  pts.forEach(function(p,i){L.marker([p.lat,p.lng],{icon:L.divIcon({className:'',html:'<div class="n">'+(i+1)+'</div>',iconSize:[26,26],iconAnchor:[13,13]})}).addTo(m).bindPopup(p.label);});
+  pts.forEach(function(p,i){L.marker([p.lat,p.lng],{icon:L.divIcon({className:'',html:'<div class="n">'+(i+1)+'</div>',iconSize:[26,26],iconAnchor:[13,13]})}).addTo(m).bindPopup(esc(p.label));});
   if(lls.length>1){L.polyline(lls,{color:'#788B76',weight:3,opacity:.75,dashArray:'6 8'}).addTo(m);m.fitBounds(lls,{padding:[30,30]});} else m.setView(lls[0],12);
 }
 </script></body></html>`;
@@ -126,7 +127,7 @@ if(pts.length===0){m.setView([20,0],2);} else{
     <ScrollView style={{ flex: 1, backgroundColor: colors.surface }} contentContainerStyle={{ paddingBottom: insets.bottom + spacing.xl }}>
       <View style={s.hero}>
         <Image source={trip.cover_photo ? { uri: trip.cover_photo } : PLACEHOLDER} style={StyleSheet.absoluteFill} contentFit="cover" />
-        <LinearGradient colors={["rgba(0,0,0,0.3)", "transparent", "rgba(0,0,0,0.85)"]} locations={[0, 0.4, 1]} style={StyleSheet.absoluteFillObject} />
+        <LinearGradient colors={["rgba(0,0,0,0.4)", "rgba(0,0,0,0.15)", "rgba(0,0,0,0.9)"]} locations={[0, 0.4, 1]} style={StyleSheet.absoluteFillObject} />
         <View style={[s.heroContent, { paddingTop: insets.top + spacing.xl }]}>
           <Text style={s.shareBadge}>SHARED ITINERARY</Text>
           <Text style={s.heroTitle} numberOfLines={2}>{trip.name}</Text>
@@ -241,9 +242,9 @@ const s = StyleSheet.create({
   hero: { height: 320, backgroundColor: colors.surfaceInverse },
   heroContent: { flex: 1, justifyContent: "flex-end", padding: spacing.lg },
   shareBadge: { color: "rgba(255,255,255,0.85)", fontSize: 11, fontWeight: "700", letterSpacing: 1, marginBottom: spacing.sm },
-  heroTitle: { color: "#fff", fontSize: 32, fontWeight: "700", letterSpacing: -0.5 },
-  heroDest: { color: "rgba(255,255,255,0.9)", fontSize: 16, marginTop: 4 },
-  heroDates: { color: "rgba(255,255,255,0.75)", fontSize: 14, marginTop: 6 },
+  heroTitle: { color: "#fff", fontSize: 32, fontWeight: "700", letterSpacing: -0.5, textShadowColor: "rgba(0,0,0,0.55)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 6 },
+  heroDest: { color: "rgba(255,255,255,0.95)", fontSize: 16, marginTop: 4, textShadowColor: "rgba(0,0,0,0.5)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4 },
+  heroDates: { color: "rgba(255,255,255,0.9)", fontSize: 14, marginTop: 6, textShadowColor: "rgba(0,0,0,0.5)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4 },
   mapWrap: { height: 260, marginHorizontal: spacing.lg, marginTop: spacing.lg, borderRadius: radius.lg, overflow: "hidden", borderWidth: 1, borderColor: colors.border },
   mapWebNotice: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, marginHorizontal: spacing.lg, marginTop: spacing.lg, padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.surfaceTertiary },
   mapWebTxt: { color: colors.muted, fontSize: 12 },

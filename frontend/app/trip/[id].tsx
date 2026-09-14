@@ -27,6 +27,7 @@ import StaysTab from "@/src/components/tabs/Stays";
 import AttractionsTab from "@/src/components/tabs/Attractions";
 import TicketsTab from "@/src/components/tabs/Tickets";
 import BudgetTab from "@/src/components/tabs/Budget";
+import DocumentsTab from "@/src/components/tabs/Documents";
 
 const TABS = [
   { key: "itinerary", label: "Itinerary", icon: "calendar-blank-outline" },
@@ -36,6 +37,7 @@ const TABS = [
   { key: "stays", label: "Stay", icon: "bed-outline" },
   { key: "attractions", label: "Attractions", icon: "map-marker-outline" },
   { key: "tickets", label: "Tickets", icon: "ticket-outline" },
+  { key: "documents", label: "Docs", icon: "file-multiple-outline" },
   { key: "budget", label: "Budget", icon: "cash-multiple" },
 ] as const;
 
@@ -109,7 +111,7 @@ export default function TripDetailScreen() {
           contentFit="cover"
         />
         <LinearGradient
-          colors={["rgba(0,0,0,0.35)", "transparent", "rgba(0,0,0,0.85)"]}
+          colors={["rgba(0,0,0,0.4)", "rgba(0,0,0,0.15)", "rgba(0,0,0,0.9)"]}
           locations={[0, 0.4, 1]}
           style={StyleSheet.absoluteFillObject}
         />
@@ -178,6 +180,7 @@ export default function TripDetailScreen() {
         {tab === "stays" && <StaysTab trip={trip} nav={nav} />}
         {tab === "attractions" && <AttractionsTab trip={trip} nav={nav} />}
         {tab === "tickets" && <TicketsTab trip={trip} nav={nav} />}
+        {tab === "documents" && <DocumentsTab trip={trip} nav={nav} />}
         {tab === "budget" && <BudgetTab trip={trip} />}
       </View>
 
@@ -226,9 +229,31 @@ const s = StyleSheet.create({
     right: spacing.lg,
     bottom: spacing.lg,
   },
-  coverTitle: { color: "#fff", fontSize: 28, fontWeight: "700", letterSpacing: -0.4 },
-  coverDest: { color: "rgba(255,255,255,0.9)", fontSize: 15, marginTop: 4 },
-  coverDates: { color: "rgba(255,255,255,0.75)", fontSize: 13, marginTop: 6 },
+  coverTitle: {
+    color: "#fff",
+    fontSize: 28,
+    fontWeight: "700",
+    letterSpacing: -0.4,
+    textShadowColor: "rgba(0,0,0,0.55)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 6,
+  },
+  coverDest: {
+    color: "rgba(255,255,255,0.95)",
+    fontSize: 15,
+    marginTop: 4,
+    textShadowColor: "rgba(0,0,0,0.5)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+  },
+  coverDates: {
+    color: "rgba(255,255,255,0.9)",
+    fontSize: 13,
+    marginTop: 6,
+    textShadowColor: "rgba(0,0,0,0.5)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+  },
   tabsWrap: {
     height: 56,
     justifyContent: "center",

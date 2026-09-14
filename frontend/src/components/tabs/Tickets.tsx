@@ -1,7 +1,9 @@
 import React from "react";
-import { View, Text, StyleSheet, Pressable, Linking, Alert } from "react-native";
+import { View, Text, StyleSheet, Pressable, Linking, Alert, Platform } from "react-native";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
+import * as DocumentPicker from "expo-document-picker";
+import * as FileSystem from "expo-file-system/legacy";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Icon from "@react-native-vector-icons/material-design-icons";
 
@@ -22,7 +24,9 @@ const TYPES: { key: Ticket["ticket_type"]; label: string; icon: string }[] = [
 ];
 
 const empty = (trip_id: string, currency: string): Ticket => ({
-  id: "", trip_id, link: "", photo: "", cost: 0, cost_currency: currency, details: "",
+  id: "", trip_id, link: "", photo: "",
+  file_base64: "", file_mime: "", file_name: "",
+  cost: 0, cost_currency: currency, details: "",
   ticket_type: "other", linked_item_id: "",
 });
 
@@ -63,7 +67,59 @@ export default function TicketsTab({ trip, nav }: { trip: Trip; nav: TabNav }) {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) { Alert.alert("Permission needed", "Please allow photo access."); return; }
     const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.8 });
-    if (!res.canceled && res.assets[0] && modal) setModal({ ...modal, photo: res.assets[0].uri });
+    if (!res.canceled && res.assets[0] && modal) {
+      // Clear any PDF that might have been attached and use the local photo URI as before
+      setModal({ ...modal, photo: res.assets[0].uri, file_base64: "", file_mime: "", file_name: "" });
+    }
+  };
+
+  const pickPdf = async () => {
+    if (!modal) return;
+    const res = await DocumentPicker.getDocumentAsync({
+      type: ["application/pdf"],
+      copyToCacheDirectory: true,
+      multiple: false,
+    });
+    if (res.canceled || !res.assets?.[0]) return;
+    const a = res.assets[0];
+    try {
+      const b64 = await FileSystem.readAsStringAsync(a.uri, { encoding: FileSystem.EncodingType.Base64 });
+      const decoded = Math.floor((b64.length * 3) / 4);
+      if (decoded > 6 * 1024 * 1024) {
+        Alert.alert("File too large", "Maximum PDF size is 6 MB.");
+        return;
+      }
+      setModal({
+        ...modal,
+        photo: "",
+        file_base64: b64,
+        file_mime: a.mimeType || "application/pdf",
+        file_name: a.name || "ticket.pdf",
+      });
+    } catch (e: any) {
+      Alert.alert("Could not read PDF", e.message || "Try another file.");
+    }
+  };
+
+  const openPdf = async (t: Ticket) => {
+    try {
+      let full = t;
+      if (!full.file_base64) {
+        // list responses may omit file_base64 in future; fetch full
+        full = await api.update("tickets", t.id, {}); // no-op patch returns full doc
+      }
+      if (!full.file_base64) return;
+      if (Platform.OS === "web") {
+        if (typeof window !== "undefined") window.open(`data:${full.file_mime || "application/pdf"};base64,${full.file_base64}`, "_blank");
+        return;
+      }
+      const target = `${FileSystem.cacheDirectory}ticket-${full.id}.pdf`;
+      await FileSystem.writeAsStringAsync(target, full.file_base64, { encoding: FileSystem.EncodingType.Base64 });
+      const supported = await Linking.canOpenURL(target);
+      if (supported) await Linking.openURL(target);
+    } catch (e: any) {
+      Alert.alert("Could not open PDF", e.message || "Try again later.");
+    }
   };
 
   const linkOptions = (type: Ticket["ticket_type"]) => {
@@ -98,6 +154,20 @@ export default function TicketsTab({ trip, nav }: { trip: Trip; nav: TabNav }) {
             <Pressable key={t.id} onPress={() => setModal(t)} style={[s.card, focused && s.cardFocused]} testID={`ticket-${t.id}`}>
               {t.photo ? (
                 <Image source={{ uri: t.photo }} style={s.photo} contentFit="cover" />
+              ) : t.file_base64 || t.file_name ? (
+                <Pressable
+                  onPress={(e) => { e.stopPropagation?.(); openPdf(t); }}
+                  style={[s.photo, { alignItems: "center", justifyContent: "center", backgroundColor: colors.brandTertiary, flexDirection: "column", gap: 8 }]}
+                >
+                  <Icon name="file-pdf-box" size={40} color={colors.brandPrimary} />
+                  <Text style={{ color: colors.onBrandTertiary, fontWeight: "600" }} numberOfLines={1}>
+                    {t.file_name || "Attached PDF"}
+                  </Text>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                    <Icon name="open-in-new" size={12} color={colors.brandPrimary} />
+                    <Text style={{ color: colors.brandPrimary, fontSize: 12 }}>Open PDF</Text>
+                  </View>
+                </Pressable>
               ) : (
                 <View style={[s.photo, { alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceTertiary }]}>
                   <Icon name="image-outline" size={32} color={colors.muted} />
@@ -143,17 +213,34 @@ export default function TicketsTab({ trip, nav }: { trip: Trip; nav: TabNav }) {
       >
         {modal && (
           <>
-            <Field label="Photo (upload from device)">
-              <Pressable testID="ticket-photo-btn" onPress={pickPhoto} style={s.photoPicker}>
-                {modal.photo ? (
-                  <Image source={{ uri: modal.photo }} style={StyleSheet.absoluteFill} contentFit="cover" />
-                ) : (
-                  <View style={{ alignItems: "center" }}>
-                    <Icon name="image-plus" size={28} color={colors.muted} />
-                    <Text style={{ color: colors.muted, marginTop: 4 }}>Add photo (portrait or landscape)</Text>
-                  </View>
-                )}
-              </Pressable>
+            <Field label="Attach photo or PDF">
+              <View style={{ flexDirection: "row", gap: spacing.sm }}>
+                <Pressable testID="ticket-photo-btn" onPress={pickPhoto} style={s.photoPicker}>
+                  {modal.photo ? (
+                    <Image source={{ uri: modal.photo }} style={StyleSheet.absoluteFill} contentFit="cover" />
+                  ) : (
+                    <View style={{ alignItems: "center" }}>
+                      <Icon name="image-plus" size={26} color={colors.muted} />
+                      <Text style={{ color: colors.muted, marginTop: 4, fontSize: 12 }}>Photo</Text>
+                    </View>
+                  )}
+                </Pressable>
+                <Pressable testID="ticket-pdf-btn" onPress={pickPdf} style={s.photoPicker}>
+                  {modal.file_base64 || modal.file_name ? (
+                    <View style={{ alignItems: "center" }}>
+                      <Icon name="file-pdf-box" size={30} color={colors.brandPrimary} />
+                      <Text style={{ color: colors.onSurface, marginTop: 4, fontSize: 12, fontWeight: "600" }} numberOfLines={1}>
+                        {modal.file_name || "PDF"}
+                      </Text>
+                    </View>
+                  ) : (
+                    <View style={{ alignItems: "center" }}>
+                      <Icon name="file-pdf-box" size={26} color={colors.muted} />
+                      <Text style={{ color: colors.muted, marginTop: 4, fontSize: 12 }}>PDF</Text>
+                    </View>
+                  )}
+                </Pressable>
+              </View>
             </Field>
 
             <Field label="Type">
@@ -228,7 +315,7 @@ const s = StyleSheet.create({
     borderRadius: radius.pill, backgroundColor: colors.brandTertiary,
   },
   linkChipTxt: { color: colors.onBrandTertiary, fontSize: 12, fontWeight: "600", flex: 1 },
-  photoPicker: { height: 180, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, borderStyle: "dashed", backgroundColor: colors.surfaceTertiary, alignItems: "center", justifyContent: "center", overflow: "hidden" },
+  photoPicker: { flex: 1, height: 140, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, borderStyle: "dashed", backgroundColor: colors.surfaceTertiary, alignItems: "center", justifyContent: "center", overflow: "hidden" },
   typeChip: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceSecondary },
   typeChipActive: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
   typeText: { color: colors.onSurface, fontSize: 13, fontWeight: "500" },

@@ -20,18 +20,28 @@ Single-user travel companion for planning trips (Upcoming/Past/Wishlist) with pe
 - **Share Trip sheet**: pick exactly what to include (flights/transport/stays/attractions/tickets/costs/map) then Copy link, Share, or **Export as PDF**
 - **PDF export**: expo-print renders a beautiful A4 multi-page PDF (cover, day-by-day itinerary, budget, tickets grid) that respects the share toggles and converts costs to the trip currency
 - **Public share page** (`/share/[shareId]`): read-only web view honouring the same toggles, with a live route map on native and a "open on phone for map" hint on web
+- **Guest / offline mode**: "Continue without signing in" on the login screen persists all trips + sub-items in AsyncStorage; a "Guest mode" banner on Home offers sign-in upsell
+- **Documents tab (9th tab)**: attach photos or PDFs that don't fit any other category; each doc can be optionally linked to any flight/transport/stay/attraction/ticket
+- **PDF booking auto-import**: AutoAddSheet accepts PDFs (server extracts text with pypdf before feeding GPT); tickets can attach photo OR PDF
+- **Collaboration invites**: the Share sheet now offers three modes — Read-only link, Invite to trip (real-time sync via `collaborators` on the trip), Send a copy (deep-clones trip + sub-items with UUID remap preserving ticket ↔ item links). Owner can revoke or a collaborator can leave.
+- **Promo video**: 12s Sora 2 render at 1280x720 shipped in `/app/frontend/assets/marketing/promo.mp4`
 
 ## Tech
-- Frontend: Expo Router, React Query, expo-image, expo-image-picker, expo-file-system/legacy, expo-print + expo-sharing, @react-native-community/datetimepicker, @react-native-vector-icons/material-design-icons, react-native-webview + Leaflet + OpenStreetMap
-- Backend: FastAPI + Motor (MongoDB), httpx (Nominatim + open.er-api.com proxies), emergentintegrations (gpt-5.4 text + vision, Gemini Nano Banana for one-off asset generation)
+- Frontend: Expo Router, React Query, expo-image, expo-image-picker, expo-document-picker, expo-file-system/legacy, expo-print + expo-sharing, @react-native-community/datetimepicker, @react-native-async-storage/async-storage, @react-native-community/netinfo, @react-native-vector-icons/material-design-icons, react-native-webview + Leaflet + OpenStreetMap
+- Backend: FastAPI + Motor (MongoDB), pypdf, httpx (Nominatim + open.er-api.com proxies), emergentintegrations (gpt-5.4 text + vision, Gemini Nano Banana for one-off asset generation, Sora 2 for the promo video)
 - Design: iOS-native clean aesthetic with sage green brand
 
 ## Key API Endpoints
-- CRUD `/api/trips`, `/api/trips/{id}` (now includes `currency`)
-- Sub-items: `/api/trips/{id}/{flights|transport|stays|attractions|tickets}` and `PATCH/DELETE /api/{kind}/{id}` (each has `cost_currency`, attractions has `notes`)
+- CRUD `/api/trips`, `/api/trips/{id}` (includes `currency`, `collaborators`)
+- Sub-items: `/api/trips/{id}/{flights|transport|stays|attractions|tickets|documents}` and `PATCH/DELETE /api/{kind}/{id}` (all now do TRUE partial updates)
+- `GET /api/documents/{id}` returns the single document with `file_base64` blob
+- `POST /api/trips/{id}/invites` `{mode: collab|copy}` → token
+- `GET  /api/invites/{token}` public preview
+- `POST /api/invites/{token}/accept` (auth) → for collab: adds user to collaborators; for copy: returns new trip_id
+- `DELETE /api/trips/{id}/collaborators/{user_id}` owner-revoke or self-leave
 - `GET /api/geocode?q=` (Nominatim proxy)
 - `GET /api/reverse-geocode?lat=&lon=`
 - `GET /api/exchange-rates?base=USD` (6-hour cache)
 - `POST /api/ai/parse-flight` (text-only, legacy)
-- `POST /api/ai/parse-booking` (text OR image_base64; currency-aware)
+- `POST /api/ai/parse-booking` (text, image, or PDF via pypdf; currency-aware)
 - `GET /api/public/trips/{share_id}` (public read-only feed)

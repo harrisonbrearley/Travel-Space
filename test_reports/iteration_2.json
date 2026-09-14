@@ -1,0 +1,35 @@
+{
+  "summary": "Round 3 backend security-hardening test complete — 31/31 pytest tests PASS (100%). Verified all items from the review request: (1) unauth requests to /api/trips, /api/trips/{id}, /api/auth/me, /api/geocode, /api/reverse-geocode, /api/exchange-rates, /api/ai/parse-flight, /api/ai/parse-booking all return 401; bad bearer token also 401. (2) POST /api/auth/session rejects short session_id with 400 and bogus session_id with 400/401 without creating a session. (3) /api/public/trips/{share_id} still works with NO auth and returns full payload; unknown share -> 404. (4) Trip ownership isolation: user A cannot GET/PATCH/DELETE/list-sub-items on user B's trip (all 404, no existence leak); GET /api/trips is scoped per-user; A cannot POST a sub-item under B's trip. (5) /api/exchange-rates rejects '../../etc/passwd', 4-letter code, and letter-with-digit with 400; accepts valid & lowercase-normalized codes. (6) /api/ai/parse-booking rejects >6MB decoded image with 413; missing text+image -> 400. (7) share_id from POST /api/trips is > 20 chars (secrets.token_urlsafe(24) ~ 32). (8) Mongo indexes verified via pymongo.index_information(): users.email unique, users.user_id unique, user_sessions.session_token unique, user_sessions.expires_at TTL (expireAfterSeconds present), trips.user_id, trips.share_id unique. (9) Rate limiter fires 429 within 12 calls to /api/ai/parse-flight for a single user (first 10 never 429). (10) Leaflet HTML in both Map.tsx and app/share/[shareId].tsx wraps popup labels via esc() before bindPopup — grep-level verified. Two test users were seeded directly in Mongo per instructions (Google OAuth flow bypassed).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_auth_test.py",
+    "/app/test_reports/pytest/auth_results.xml"
+  ],
+  "action_items": [
+    "Update /app/memory/test_credentials.md — it still says 'No authentication is used in this app', but Google Sign-In was added in this round. Document how to seed a mock user + session_token in Mongo (users + user_sessions collections) for future testing agents. This test file (backend_auth_test.py) contains _seed_user() as a reference implementation."
+  ],
+  "critical_code_review_comments": [
+    "server.py generic _update factory (used for PATCH /flights|/transport|/stays|/attractions|/tickets/{item_id}) still accepts the full model and overwrites the doc with data.dict(exclude={'id'}). This means a PATCH with an empty body clobbers all fields to defaults. Prior iteration flagged this — still unresolved. Trip PATCH is fine (uses TripUpdate). Consider partial-update models for sub-items too.",
+    "get_current_user parses 'expires_at' but if it's stored as native datetime by motor (which it is in auth_session insert), the string-parsing branch is dead. Fine, just noting.",
+    "startup index creation logs a warning on failure but does not fail startup — in this environment all 7 indexes were verified present. If a legacy DB had duplicate emails, users.email unique would fail silently at boot; would be worth surfacing more loudly.",
+    "Rate limiter is in-process defaultdict — resets on backend restart and does not shard across replicas. Acceptable for MVP; document if scaling."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_auth_test.py (new)"
+  ],
+  "success_rate": {"backend": "100% (31/31)", "frontend": "not tested (backend-only request)"},
+  "seed_data_creation": "Two users seeded directly in Mongo (users + user_sessions) via _seed_user() with TEST_ prefix on user_id and session_token. Session fixtures teardown removes all seeded users/sessions and any trips created during tests (with cascade).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Base URL from /app/frontend/.env EXPO_PUBLIC_BACKEND_URL. Auth is required for every /api endpoint except / (root), /public/trips/{share_id}, /auth/session, and /auth/logout. Seed test users directly in Mongo (db.users + db.user_sessions) — do NOT go through the real Google OAuth flow. See _seed_user() in /app/backend/tests/backend_auth_test.py for the exact shape. Use Authorization: Bearer <session_token>. Previous test file /app/backend/tests/backend_round2_test.py is NOT updated for the auth wall and its trip/geocode/ai tests would now 401 — either add auth headers or archive it.",
+  "rca_of_issue": "N/A — all tests pass. Only self-inflicted issue was in the image-size cap test: initial payload was too big for pydantic's max_length=9_000_000 and errored before reaching the size check. Fixed by tuning raw size to 6.125 MB (b64 ~8.56M chars, decoded ~6.42MB) so the request passes pydantic and hits the server-side 413 branch."
+}

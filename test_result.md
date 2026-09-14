@@ -101,3 +101,262 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+
+user_problem_statement: |
+  Multi-feature iteration on the Travel Space mobile app:
+  1) Fix the backend generic sub-item PATCH so it does a TRUE partial update (previously the
+     dict-defaults on Pydantic models were overwriting untouched fields).
+  2) Allow PDF uploads for bookings (AutoAddSheet) and tickets (ticket photo/PDF picker).
+     Server extracts PDF text via pypdf before feeding to GPT.
+  3) Add a NEW "Documents" tab (9th tab). Any photo or PDF can be attached, with optional
+     linked_type/linked_item_id to cross-reference other trip items (flight, transport,
+     stay, attraction, ticket).
+  4) Offline / local-only mode: a "Continue without signing in" button on the login screen
+     that switches all API calls to an AsyncStorage-backed store. Guest banner + Sign-In
+     upsell shown on home.
+  5) Collaboration invites: sharing a trip now offers three modes — Read-only link
+     (existing behaviour), Invite to trip (adds accepter to `collaborators`, sync writes),
+     Send a copy (deep-clones the trip + all sub-items into a new trip for the accepter).
+  6) Sora 2 promotional video (12s, 1280x720) saved to /app/frontend/assets/marketing/promo.mp4.
+
+backend:
+  - task: "Partial PATCH for sub-items"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: |
+          _generic_update_factory now accepts a `dict` body (via fastapi Body) and only
+          $set's whitelisted keys from Model.model_fields (minus id/trip_id). Same treatment
+          for the new /documents PATCH. Verified with curl: PATCH flights with only {"notes"}
+          keeps airline/cost/etc unchanged.
+      - working: true
+        agent: "testing"
+        comment: |
+          Verified via /app/backend/tests/backend_round4_test.py::TestPartialPatchRegression.
+          For each of flights, transport, stays, attractions, tickets, and documents:
+          created a fully-populated sub-item, PATCHed exactly ONE field, GET'd back and
+          asserted every other field is unchanged. All 6 sub-item classes PASS. On documents,
+          file_base64 and size are also preserved when PATCHing only notes.
+  - task: "PDF ingestion for AI booking parser"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: |
+          When mime=="application/pdf", server uses pypdf to extract up to 20 pages, caps at
+          18k chars, and passes as text prompt (no image_base64 to Vision). ParseBookingRequest
+          max_length raised to 14 MB base64 (~10 MB PDF).
+      - working: true
+        agent: "testing"
+        comment: |
+          Per review request, skipped the real-PDF LLM path (cost/flakiness). Verified the
+          error branch: POST /api/ai/parse-booking with mime=application/pdf and invalid
+          base64 bytes ("not a real PDF") returns 400 with detail "Could not read PDF" —
+          confirms the pypdf try/except correctly funnels malformed input to the 400 path
+          and does NOT leak to the LLM. Test: TestParseBookingPDFInvalid.
+  - task: "Documents collection + CRUD"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: |
+          New Document model + GET/POST/PATCH/DELETE endpoints. list_documents strips
+          file_base64 to keep responses small; get_document returns the blob. 8 MB cap.
+          Public share endpoint returns documents metadata (no blobs).
+      - working: true
+        agent: "testing"
+        comment: |
+          Full CRUD lifecycle verified (TestDocumentsCRUD::test_full_lifecycle):
+          POST returns computed size; LIST strips file_base64 to "" while keeping size>0;
+          single GET returns full blob equal to what was POSTed; PATCH notes-only preserves
+          blob + size; DELETE removes the doc and subsequent GET is 404. Access control
+          verified (TestDocumentsAccessControl): a second seeded user gets 404 on GET
+          single, LIST via trip, PATCH, and DELETE for a doc owned by user_demo_marketing.
+  - task: "Collaboration invites (collab + copy) + collaborators access"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: |
+          Added Trip.collaborators: List[str]. require_trip supports owner+collaborator, with
+          owner_only kwarg for delete/invite creation. New endpoints:
+            POST /api/trips/{id}/invites   {mode: collab|copy}
+            GET  /api/invites/{token}       (public preview, no auth)
+            POST /api/invites/{token}/accept
+            DELETE /api/trips/{id}/collaborators/{user_id}
+          Copy mode deep-clones sub-items with a UUID remap so ticket <-> item links survive.
+          list_trips now returns trips where the user is owner OR collaborator.
+      - working: true
+        agent: "testing"
+        comment: |
+          Collab flow (TestInviteCollab): owner POST invite → public GET preview no-auth
+          returns trip/owner info with expired=false → second user accepts → trip appears
+          in second user's /trips list → second user PATCH flight on shared trip SUCCEEDS
+          (verified other fields preserved) → second user DELETE /trips returns 403 (owner
+          only) → owner revokes via DELETE /trips/{id}/collaborators/{uid} and trip
+          disappears from ex-collaborator's list. Copy flow (TestInviteCopy): owner has
+          trip with flight+ticket bidirectionally linked; copy invite accepted by second
+          user returns NEW trip_id owned by them; cloned name starts with "Copy of ";
+          cloned flight/ticket have new UUIDs; CRITICAL: cloned_ticket.linked_item_id
+          points to cloned_flight.id AND cloned_flight.ticket_id points to cloned_ticket.id
+          (not originals); deleting the clone leaves original flight+ticket intact. All
+          checks PASS.
+
+frontend:
+  - task: "Documents tab UI"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/components/tabs/Documents.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: |
+          Photo (ImagePicker) + PDF/File (DocumentPicker) upload, base64-encoded on device,
+          preview thumbnail, link-to selector for any other tab item, opens via cache write +
+          Linking on native / data URI on web. Registered as 9th tab in /app/trip/[id].tsx.
+  - task: "PDF picker in AutoAddSheet"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/components/AutoAddSheet.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: |
+          "Or attach a PDF booking" secondary button uses DocumentPicker with pdf type.
+          Body sent with mime=application/pdf so server routes to pypdf extractor.
+  - task: "PDF attachment on Tickets"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/components/tabs/Tickets.tsx"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: |
+          Two side-by-side pickers (Photo | PDF) in the ticket modal. Card preview shows a
+          "Open PDF" tile when a PDF is attached; tapping downloads it to cache and opens
+          via Linking.
+  - task: "Guest / local-only mode"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/localStore.ts, /app/frontend/src/api.ts, /app/frontend/src/auth.tsx, /app/frontend/app/login.tsx, /app/frontend/app/_layout.tsx, /app/frontend/app/index.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: |
+          "Continue without signing in" on the login screen calls useLocal() which sets
+          isLocal=true and setLocalMode(true) on the api client. All trip/sub-item calls
+          route to localApi (AsyncStorage-backed) instead of fetch. AuthGate accepts either
+          user or isLocal to consider the session valid. Home shows a "Guest mode" banner
+          with a Sign-in upsell.
+  - task: "Share sheet with three modes + invite screen"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/components/ShareOptionsSheet.tsx, /app/frontend/app/invite/[token].tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: |
+          ShareOptionsSheet now shows three big mode cards (Read-only / Invite / Copy) and
+          conditionally shows the per-tab toggle rows only for the public read-only case.
+          Invite screen (/invite/[token]) is added to the "in-public" allowlist so it works
+          without login; it previews trip name + owner and dispatches accept.
+
+metadata:
+  created_by: "main_agent"
+  version: "2.0"
+  test_sequence: 4
+  run_ui: false
+
+test_plan:
+  current_focus:
+    - "Partial PATCH for sub-items"
+    - "PDF ingestion for AI booking parser"
+    - "Documents collection + CRUD"
+    - "Collaboration invites (collab + copy) + collaborators access"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+  - agent: "main"
+    message: |
+      Please run backend regression + new-endpoint tests. Auth token to use:
+      Authorization: Bearer demo_marketing_token_12345
+      Seeded user_id: user_demo_marketing (email alex@travelspace.demo)
+      Seeded trip_id: 9fbdeac7-a11c-4be2-a448-9c8560a1b6ad (has 1 flight, etc.)
+      Focus:
+      1. PATCH /api/flights/{id} with only {"notes":"x"} — assert airline/cost unchanged.
+      2. Same partial-update check on transport, stays, attractions, tickets, documents.
+      3. POST /api/trips/{id}/documents with a tiny base64 blob, then list (should strip
+         file_base64), get single (should return blob), PATCH notes only, DELETE.
+      4. Invite lifecycle: POST /trips/{id}/invites both modes, GET /invites/{token}
+         preview without auth, POST /invites/{token}/accept — for collab mode, the trip
+         list of ANOTHER user (create a second session? or use existing) should include
+         the trip after accept; for copy mode, a new trip is returned with cloned
+         sub-items and ticket <-> item links preserved.
+      5. Access control: user without ownership OR collab must 404 on GET/PATCH.
+      6. Backward-compat: ensure /trips still includes existing single-user trip.
+      Skip frontend testing this round; UI was screenshot-verified.
+  - agent: "testing"
+    message: |
+      Round 4 complete — 14/14 tests PASS (100%). See /app/backend/tests/backend_round4_test.py
+      and /app/test_reports/iteration_3.json + /app/test_reports/pytest/round4_results.xml.
+
+      Highlights:
+      • Partial PATCH regression PASSES for all 6 collections (flights/transport/stays/
+        attractions/tickets/documents). Every non-patched field survives, including
+        file_base64/size on documents.
+      • Documents CRUD works end-to-end. LIST strips blob (empty string, size>0);
+        single GET returns blob; PATCH notes-only preserves blob.
+      • Access control isolates a second seeded user (404 on GET/LIST/PATCH/DELETE).
+      • Collab invite: public preview no-auth works, accept adds user to collaborators,
+        collab can PATCH sub-items, collab CANNOT delete trip (403), owner can revoke.
+      • Copy invite: deep-clones flight+ticket with UUID remap — cloned ticket's
+        linked_item_id and cloned flight's ticket_id both point to the CLONED IDs, not
+        the originals. Deleting the clone leaves original data intact.
+      • PDF invalid-bytes path returns 400 "Could not read PDF" as designed.
+      • Seed token demo_marketing_token_12345 preserved; seed trip + QF25 flight untouched.
+
+      Non-blocking action items for main agent:
+      1. InvitePreview leaks owner_email to unauthenticated callers — consider dropping
+         it or masking to first-letter+domain (@travelspace.demo).
+      2. A collaborator can currently PATCH the trip itself (rename/etc). If that's not
+         intended, tighten update_trip to owner_only or add finer-grained perms.
+      3. Round 2 test file (backend_round2_test.py) still uses no auth — will 401 now.
+         Either add Authorization headers or archive it.

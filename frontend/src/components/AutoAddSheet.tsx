@@ -2,6 +2,7 @@ import React from "react";
 import { View, Text, StyleSheet, Modal, Pressable, ScrollView, ActivityIndicator, Alert, Platform, KeyboardAvoidingView } from "react-native";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
+import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -25,11 +26,15 @@ export function AutoAddSheet({
   const insets = useSafeAreaInsets();
   const qc = useQueryClient();
   const [text, setText] = React.useState("");
-  const [imageUri, setImageUri] = React.useState("");
+  const [fileUri, setFileUri] = React.useState("");
+  const [fileMime, setFileMime] = React.useState("");
+  const [fileName, setFileName] = React.useState("");
 
   const reset = () => {
     setText("");
-    setImageUri("");
+    setFileUri("");
+    setFileMime("");
+    setFileName("");
   };
 
   const closeReset = () => {
@@ -48,19 +53,37 @@ export function AutoAddSheet({
       quality: 0.7,
       base64: false,
     });
-    if (!res.canceled && res.assets[0]) setImageUri(res.assets[0].uri);
+    if (!res.canceled && res.assets[0]) {
+      const a = res.assets[0];
+      setFileUri(a.uri);
+      setFileMime(a.mimeType || (a.uri.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg"));
+      setFileName(a.fileName || "screenshot");
+    }
+  };
+
+  const pickPdf = async () => {
+    const res = await DocumentPicker.getDocumentAsync({
+      type: ["application/pdf"],
+      copyToCacheDirectory: true,
+      multiple: false,
+    });
+    if (res.canceled || !res.assets?.[0]) return;
+    const a = res.assets[0];
+    setFileUri(a.uri);
+    setFileMime(a.mimeType || "application/pdf");
+    setFileName(a.name || "booking.pdf");
   };
 
   const run = useMutation({
     mutationFn: async () => {
       const body: any = {};
       if (text.trim()) body.text = text.trim();
-      if (imageUri) {
-        const b64 = await FileSystem.readAsStringAsync(imageUri, { encoding: FileSystem.EncodingType.Base64 });
+      if (fileUri) {
+        const b64 = await FileSystem.readAsStringAsync(fileUri, { encoding: FileSystem.EncodingType.Base64 });
         body.image_base64 = b64;
-        body.mime = imageUri.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg";
+        body.mime = fileMime || (fileUri.toLowerCase().endsWith(".pdf") ? "application/pdf" : "image/jpeg");
       }
-      if (!body.text && !body.image_base64) throw new Error("Paste text or add a screenshot first.");
+      if (!body.text && !body.image_base64) throw new Error("Paste text or add a screenshot / PDF first.");
 
       const parsed = await api.parseBooking(body);
       const cat = parsed.category;
@@ -196,19 +219,26 @@ export function AutoAddSheet({
             </Text>
           </View>
 
-          <Text style={s.sectionTitle}>1. Add a screenshot</Text>
+          <Text style={s.sectionTitle}>1. Add a screenshot or PDF</Text>
           <Pressable testID="autoadd-pick" onPress={pickImage} style={s.imagePicker}>
-            {imageUri ? (
-              <Image source={{ uri: imageUri }} style={StyleSheet.absoluteFill} contentFit="cover" />
+            {fileUri && fileMime.startsWith("image/") ? (
+              <Image source={{ uri: fileUri }} style={StyleSheet.absoluteFill} contentFit="cover" />
+            ) : fileUri ? (
+              <View style={{ alignItems: "center" }}>
+                <Icon name="file-pdf-box" size={40} color={colors.brandPrimary} />
+                <Text style={{ color: colors.onSurface, marginTop: 4, fontWeight: "600" }} numberOfLines={1}>
+                  {fileName || "booking.pdf"}
+                </Text>
+              </View>
             ) : (
               <View style={{ alignItems: "center" }}>
                 <Icon name="image-plus" size={28} color={colors.muted} />
                 <Text style={{ color: colors.muted, marginTop: 4 }}>Pick a booking screenshot</Text>
               </View>
             )}
-            {imageUri ? (
+            {fileUri ? (
               <Pressable
-                onPress={() => setImageUri("")}
+                onPress={() => { setFileUri(""); setFileMime(""); setFileName(""); }}
                 style={s.clearImg}
                 hitSlop={10}
                 testID="autoadd-clear-image"
@@ -216,6 +246,11 @@ export function AutoAddSheet({
                 <Icon name="close" size={16} color="#fff" />
               </Pressable>
             ) : null}
+          </Pressable>
+
+          <Pressable testID="autoadd-pick-pdf" onPress={pickPdf} style={s.pdfBtn}>
+            <Icon name="file-pdf-box" size={18} color={colors.onSurface} />
+            <Text style={s.pdfBtnTxt}>Or attach a PDF booking</Text>
           </Pressable>
 
           <Text style={s.sectionTitle}>2. Or paste confirmation text</Text>
@@ -284,4 +319,18 @@ const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  pdfBtn: {
+    marginTop: -spacing.sm,
+    marginBottom: spacing.md,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 12,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceSecondary,
+  },
+  pdfBtnTxt: { color: colors.onSurface, fontWeight: "600", fontSize: 13 },
 });

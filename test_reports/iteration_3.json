@@ -1,0 +1,39 @@
+{
+  "summary": "Round 4 backend regression + new-endpoint tests — 14/14 pytest tests PASS (100%). Verified all items from the review request. (A) Partial PATCH regression: created a full-populated sub-item then PATCHed exactly one field for flights, transport, stays, attractions, tickets, AND the new documents collection; every other field was preserved (including file_base64/size on documents). Fix in _generic_update_factory + PATCH /documents confirmed working. (B) Documents CRUD lifecycle: POST returns computed size; GET /trips/{id}/documents strips file_base64 (empty string) while keeping size>0; GET /documents/{id} returns the full blob; PATCH notes-only keeps blob and size intact; DELETE returns 200 and follow-up GET returns 404. (C) Access control: a second test user (seeded directly in Mongo — pattern preserved from Round 3) gets 404 on GET/LIST/PATCH/DELETE for a document belonging to the seeded user's trip. (D) Invite collab flow: owner POST /invites returns {token, mode:'collab'}; public GET /invites/{token} works with NO auth and returns trip + owner info + expired=false; second user POST /accept -> collab; second user's /trips list now includes the trip; second user can PATCH a flight on that trip (returns updated notes, other fields preserved); second user's DELETE /trips returns 403/404 (verified 403); DELETE /trips/{id}/collaborators/{uid} by owner removes them and the trip disappears from their list. (E) Copy flow: original trip has flight+ticket with bidirectional link; owner creates copy invite; second user accepts and gets a NEW trip_id; cloned trip name starts with 'Copy of '; cloned flight/ticket have new UUIDs; CRITICAL: cloned_ticket.linked_item_id points to cloned_flight.id and cloned_flight.ticket_id points to cloned_ticket.id (NOT the originals); deleting the clone leaves the original flight+ticket intact. (F) parse-booking PDF invalid bytes: mime=application/pdf with 'not a real PDF' base64 returns HTTP 400 with detail 'Could not read PDF'. (G) Regression: seeded user (demo_marketing_token_12345, user_demo_marketing) — /auth/me returns the seeded user; GET /trips list includes seed trip 9fbdeac7-a11c-4be2-a448-9c8560a1b6ad; GET /trips/{seed}/flights still shows the seeded QF25 Qantas SYD->HND flight. Seed token was NOT invalidated.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_round4_test.py",
+    "/app/test_reports/pytest/round4_results.xml"
+  ],
+  "action_items": [
+    "None blocking. Optional polish: (1) Round 2 test file backend_round2_test.py still doesn't send auth headers and would now 401 across the board — either add Authorization or archive it. (2) InvitePreview.owner_email is exposed publicly (no-auth GET /invites/{token}). Owners might not want their email revealed to anyone with the link — consider returning only owner_name and dropping owner_email from the public preview (or masking to first-letter+domain).",
+    "Consider adding rate-limiting or expiry-scan cleanup for db.trip_invites; currently invites live 30 days and there's no DELETE endpoint if the owner wants to revoke a link before it's used."
+  ],
+  "critical_code_review_comments": [
+    "_generic_update_factory now correctly whitelists Model.model_fields minus id/trip_id — TRUE partial update works. Same treatment on PATCH /documents. Fix is clean and consistent.",
+    "_clone_trip_for_user pre-builds id_map across ALL 6 collections before writing (two-pass), so ticket -> item and item -> ticket references remap correctly even when they cross collection boundaries. Verified end-to-end.",
+    "require_trip owner_only kwarg is a nice minimal change; owner-only paths are POST /invites and DELETE /trips. Consider also making TripUpdate PATCH owner-only (currently a collaborator can rename someone else's trip). Not a blocker but a surprise vs 'only owner can revoke collab' semantics.",
+    "InvitePreview leaks owner_email to unauthenticated callers — see action items.",
+    "MAX_DOCUMENT_BYTES=8MB check happens in POST but NOT for oversized existing docs; the PATCH /documents does re-check when file_base64 is updated (good).",
+    "pypdf import inside the endpoint is fine but adds ~50ms first-call latency; module-level import would be cleaner. Not a correctness issue.",
+    "No explicit MIME check on Document.mime — a client could store kind='photo' with mime='application/x-executable'. Low priority since blobs are only served back to the owning user."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_round4_test.py (new)"
+  ],
+  "success_rate": {"backend": "100% (14/14)", "frontend": "not tested (backend-only request)"},
+  "seed_data_creation": "Preserved the marketing seed user (user_demo_marketing, token demo_marketing_token_12345) and seed trip (9fbdeac7-a11c-4be2-a448-9c8560a1b6ad). One additional session-scope test user was seeded directly in Mongo (users + user_sessions collections) using the same pattern as backend_auth_test.py::_seed_user, with cleanup on teardown (removes user, session, any owned trips + sub-items, and pulls user_id from any collaborators arrays). Per-test temp trips also cascade-cleaned including trip_invites.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "BASE URL from /app/frontend/.env EXPO_PUBLIC_BACKEND_URL (also works via http://localhost:8001). Seed auth: Authorization: Bearer demo_marketing_token_12345 (user_demo_marketing / alex@travelspace.demo). Seed trip: 9fbdeac7-a11c-4be2-a448-9c8560a1b6ad. For multi-user tests, seed directly in Mongo (see _seed_user in backend_auth_test.py or the second_user fixture in backend_round4_test.py). Documents endpoints: GET /api/trips/{id}/documents (list, no blob), GET /api/documents/{id} (single, with blob), POST /api/trips/{id}/documents, PATCH /api/documents/{id} (dict body), DELETE /api/documents/{id}. Invites: POST /api/trips/{id}/invites body {mode:collab|copy}, GET /api/invites/{token} PUBLIC no-auth, POST /api/invites/{token}/accept, DELETE /api/trips/{id}/collaborators/{user_id} (owner OR self). Sub-item PATCH endpoints now accept a bare dict body (Body(...)), NOT the full Pydantic model — only whitelisted keys from the model are $set.",
+  "rca_of_issue": "N/A — everything under review passed on first run. All fixes from this iteration verified working as described."
+}

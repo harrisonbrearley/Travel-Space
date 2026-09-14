@@ -1,9 +1,9 @@
 import React from "react";
-import { View, Text, StyleSheet, Modal, Pressable, Share, Switch, ScrollView, Platform, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, Modal, Pressable, Share, Switch, ScrollView, Platform, ActivityIndicator, Alert } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Icon from "@react-native-vector-icons/material-design-icons";
 import { colors, radius, spacing } from "@/src/theme";
-import { api, type Trip } from "@/src/api";
+import { api, isLocalMode, type Trip } from "@/src/api";
 import { exportTripPdf } from "@/src/exportPdf";
 import { useRates } from "@/src/currency";
 
@@ -26,6 +26,29 @@ const DEFAULTS: Record<string, boolean> = {
 
 const STORAGE_KEY = "share_opts_v1";
 
+type Mode = "public" | "collab" | "copy";
+
+const MODES: { key: Mode; label: string; icon: string; description: string }[] = [
+  {
+    key: "public",
+    label: "Read-only link",
+    icon: "link-variant",
+    description: "Anyone with the link sees a beautiful web view. They can't edit anything.",
+  },
+  {
+    key: "collab",
+    label: "Invite to trip",
+    icon: "account-multiple-plus",
+    description: "They join the same trip. Their edits sync with yours in real time.",
+  },
+  {
+    key: "copy",
+    label: "Send a copy",
+    icon: "content-duplicate",
+    description: "They get their own private copy. Your trip stays untouched.",
+  },
+];
+
 export function ShareOptionsSheet({
   visible,
   onClose,
@@ -36,12 +59,13 @@ export function ShareOptionsSheet({
   trip: Trip;
 }) {
   const insets = useSafeAreaInsets();
+  const [mode, setMode] = React.useState<Mode>("public");
   const [opts, setOpts] = React.useState<Record<string, boolean>>(DEFAULTS);
   const [exporting, setExporting] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
   const rates = useRates();
 
   React.useEffect(() => {
-    // Load persisted options
     if (Platform.OS === "web") {
       try {
         const stored = window.localStorage?.getItem(STORAGE_KEY);
@@ -50,42 +74,92 @@ export function ShareOptionsSheet({
     }
   }, [visible]);
 
+  const localOnly = isLocalMode();
+
   const toggle = (k: string) => setOpts((o) => ({ ...o, [k]: !o[k] }));
 
-  const buildUrl = () => {
+  const buildPublicUrl = () => {
     const base = process.env.EXPO_PUBLIC_BACKEND_URL;
-    const qs = Object.entries(opts)
-      .map(([k, v]) => `${k}=${v ? 1 : 0}`)
-      .join("&");
+    const qs = Object.entries(opts).map(([k, v]) => `${k}=${v ? 1 : 0}`).join("&");
     return `${base}/share/${trip.share_id}?${qs}`;
   };
 
-  const doShare = async () => {
-    const url = buildUrl();
+  const buildInviteUrl = (token: string) => {
+    const base = process.env.EXPO_PUBLIC_BACKEND_URL;
+    return `${base}/invite/${token}`;
+  };
+
+  const persistOpts = () => {
     try {
-      if (Platform.OS === "web") {
-        window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(opts));
-      }
+      if (Platform.OS === "web") window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(opts));
     } catch {}
+  };
+
+  const shareUrl = async (url: string, label: string) => {
     try {
       await Share.share({
         title: trip.name,
-        message: `Check out my trip "${trip.name}"\n${url}`,
+        message: `${label}: "${trip.name}"\n${url}`,
         url,
       });
       onClose();
     } catch {}
   };
 
-  const copyLink = async () => {
-    const url = buildUrl();
-    if (Platform.OS === "web" && navigator.clipboard) {
+  const copyUrl = async (url: string) => {
+    if (Platform.OS === "web" && typeof navigator !== "undefined" && (navigator as any).clipboard) {
       try {
-        await navigator.clipboard.writeText(url);
+        await (navigator as any).clipboard.writeText(url);
+        Alert.alert("Copied", "Link copied to clipboard.");
+        return;
       } catch {}
     }
-    // Fall through to Share on native
-    doShare();
+    // fallback to native share sheet
+    await shareUrl(url, "Trip link");
+  };
+
+  const generateInviteAndShare = async (m: "collab" | "copy", act: "share" | "copy") => {
+    if (localOnly) {
+      Alert.alert(
+        "Sign in required",
+        m === "collab"
+          ? "Real-time collaboration needs a Travel Space account. Please sign in first."
+          : "To send a copy that others can save to their account, please sign in first.",
+      );
+      return;
+    }
+    setBusy(true);
+    try {
+      const res: any = await api.createInvite(trip.id, m);
+      const url = buildInviteUrl(res.token);
+      if (act === "share") {
+        await shareUrl(url, m === "collab" ? "Join my trip" : "Copy of my trip");
+      } else {
+        await copyUrl(url);
+      }
+    } catch (e: any) {
+      Alert.alert("Could not create invite", e.message || "Try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const doShare = async () => {
+    persistOpts();
+    if (mode === "public") {
+      await shareUrl(buildPublicUrl(), "Check out my trip");
+    } else {
+      await generateInviteAndShare(mode, "share");
+    }
+  };
+
+  const doCopy = async () => {
+    persistOpts();
+    if (mode === "public") {
+      await copyUrl(buildPublicUrl());
+    } else {
+      await generateInviteAndShare(mode, "copy");
+    }
   };
 
   const exportPdf = async () => {
@@ -118,6 +192,8 @@ export function ShareOptionsSheet({
     }
   };
 
+  const activeMode = MODES.find((m) => m.key === mode)!;
+
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <View style={{ flex: 1, backgroundColor: colors.surface }}>
@@ -129,44 +205,93 @@ export function ShareOptionsSheet({
           <View style={{ width: 40 }} />
         </View>
 
-        <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: 120 + insets.bottom }}>
-          <View style={s.intro}>
-            <Icon name="link-variant" size={20} color={colors.brandPrimary} />
-            <Text style={s.introTxt}>
-              Anyone with the link will see a read-only view of &quot;{trip.name}&quot;. Choose exactly what to include below.
-            </Text>
+        <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: 140 + insets.bottom }}>
+          <Text style={s.section}>How do you want to share it?</Text>
+          <View style={{ gap: spacing.sm }}>
+            {MODES.map((m) => {
+              const active = m.key === mode;
+              return (
+                <Pressable
+                  key={m.key}
+                  onPress={() => setMode(m.key)}
+                  style={[s.modeCard, active && s.modeCardActive]}
+                  testID={`share-mode-${m.key}`}
+                >
+                  <View style={[s.modeIcon, active && s.modeIconActive]}>
+                    <Icon name={m.icon as any} size={20} color={active ? colors.onBrandPrimary : colors.brandPrimary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.modeLabel}>{m.label}</Text>
+                    <Text style={s.modeDesc}>{m.description}</Text>
+                  </View>
+                  <Icon
+                    name={active ? "check-circle" : "circle-outline"}
+                    size={22}
+                    color={active ? colors.brandPrimary : colors.muted}
+                  />
+                </Pressable>
+              );
+            })}
           </View>
 
-          <Text style={s.section}>Include</Text>
-          {OPTS.map((o) => (
-            <View key={o.key} style={s.row}>
-              <View style={s.rowIcon}>
-                <Icon name={o.icon as any} size={18} color={colors.brandPrimary} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={s.rowLabel}>{o.label}</Text>
-                {o.description && <Text style={s.rowDesc}>{o.description}</Text>}
-              </View>
-              <Switch
-                testID={`share-opt-${o.key}`}
-                value={!!opts[o.key]}
-                onValueChange={() => toggle(o.key)}
-              />
+          {localOnly && mode !== "public" ? (
+            <View style={s.warn}>
+              <Icon name="alert-circle-outline" size={16} color={colors.warning || colors.brandPrimary} />
+              <Text style={s.warnTxt}>
+                {mode === "collab"
+                  ? "Real-time collaboration needs a Travel Space account. Sign in from the home screen to enable it."
+                  : "Sending copies to other people requires a Travel Space account. Sign in from the home screen to enable it."}
+              </Text>
             </View>
-          ))}
+          ) : null}
+
+          {mode === "public" && (
+            <>
+              <Text style={[s.section, { marginTop: spacing.xl }]}>Include in the link</Text>
+              {OPTS.map((o) => (
+                <View key={o.key} style={s.row}>
+                  <View style={s.rowIcon}>
+                    <Icon name={o.icon as any} size={18} color={colors.brandPrimary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.rowLabel}>{o.label}</Text>
+                    {o.description && <Text style={s.rowDesc}>{o.description}</Text>}
+                  </View>
+                  <Switch
+                    testID={`share-opt-${o.key}`}
+                    value={!!opts[o.key]}
+                    onValueChange={() => toggle(o.key)}
+                  />
+                </View>
+              ))}
+            </>
+          )}
+
+          {mode !== "public" && (
+            <View style={[s.intro, { marginTop: spacing.xl }]}>
+              <Icon name={activeMode.icon as any} size={20} color={colors.brandPrimary} />
+              <Text style={s.introTxt}>
+                {mode === "collab"
+                  ? "The invite link works for anyone. When they tap it, they'll sign in and be added to this trip. Their edits appear here in real time."
+                  : "The invite link works for anyone. When they tap it, a fresh copy of this trip is saved to their account. Your trip is not affected by their edits."}
+              </Text>
+            </View>
+          )}
         </ScrollView>
 
         <View style={[s.footer, { paddingBottom: insets.bottom + spacing.md }]}>
-          <Pressable onPress={exportPdf} disabled={exporting} style={[s.footerBtn, s.footerSecondary]} testID="share-pdf">
-            {exporting ? <ActivityIndicator color={colors.onSurface} size="small" /> : <Icon name="file-pdf-box" size={16} color={colors.onSurface} />}
-            <Text style={{ color: colors.onSurface, fontWeight: "600" }}>PDF</Text>
-          </Pressable>
-          <Pressable onPress={copyLink} style={[s.footerBtn, s.footerSecondary]} testID="share-copy">
-            <Icon name="content-copy" size={16} color={colors.onSurface} />
+          {mode === "public" ? (
+            <Pressable onPress={exportPdf} disabled={exporting} style={[s.footerBtn, s.footerSecondary]} testID="share-pdf">
+              {exporting ? <ActivityIndicator color={colors.onSurface} size="small" /> : <Icon name="file-pdf-box" size={16} color={colors.onSurface} />}
+              <Text style={{ color: colors.onSurface, fontWeight: "600" }}>PDF</Text>
+            </Pressable>
+          ) : null}
+          <Pressable onPress={doCopy} disabled={busy} style={[s.footerBtn, s.footerSecondary, busy && { opacity: 0.6 }]} testID="share-copy">
+            {busy ? <ActivityIndicator color={colors.onSurface} size="small" /> : <Icon name="content-copy" size={16} color={colors.onSurface} />}
             <Text style={{ color: colors.onSurface, fontWeight: "600" }}>Copy link</Text>
           </Pressable>
-          <Pressable onPress={doShare} style={[s.footerBtn, s.footerPrimary]} testID="share-send">
-            <Icon name="share-variant" size={16} color={colors.onBrandPrimary} />
+          <Pressable onPress={doShare} disabled={busy} style={[s.footerBtn, s.footerPrimary, busy && { opacity: 0.6 }]} testID="share-send">
+            {busy ? <ActivityIndicator color={colors.onBrandPrimary} size="small" /> : <Icon name="share-variant" size={16} color={colors.onBrandPrimary} />}
             <Text style={{ color: colors.onBrandPrimary, fontWeight: "600" }}>Share</Text>
           </Pressable>
         </View>
@@ -191,7 +316,6 @@ const s = StyleSheet.create({
     padding: spacing.md,
     backgroundColor: colors.brandTertiary,
     borderRadius: radius.md,
-    marginBottom: spacing.xl,
     alignItems: "center",
   },
   introTxt: { flex: 1, color: colors.onBrandTertiary, fontSize: 13, lineHeight: 18 },
@@ -203,6 +327,37 @@ const s = StyleSheet.create({
     letterSpacing: 0.5,
     marginBottom: spacing.sm,
   },
+  modeCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceSecondary,
+  },
+  modeCardActive: { borderColor: colors.brandPrimary, backgroundColor: colors.brandTertiary },
+  modeIcon: {
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: colors.brandTertiary,
+    alignItems: "center", justifyContent: "center",
+  },
+  modeIconActive: { backgroundColor: colors.brandPrimary },
+  modeLabel: { color: colors.onSurface, fontSize: 15, fontWeight: "700" },
+  modeDesc: { color: colors.muted, fontSize: 12, marginTop: 2, lineHeight: 16 },
+  warn: {
+    flexDirection: "row",
+    gap: 8,
+    padding: spacing.md,
+    marginTop: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceTertiary,
+    alignItems: "flex-start",
+  },
+  warnTxt: { flex: 1, color: colors.muted, fontSize: 12, lineHeight: 16 },
   row: {
     flexDirection: "row",
     alignItems: "center",

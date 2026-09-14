@@ -17,6 +17,7 @@ import Icon from "@react-native-vector-icons/material-design-icons";
 import { api, type Trip } from "@/src/api";
 import { colors, radius, spacing } from "@/src/theme";
 import { niceDate } from "@/src/components/form";
+import { useAuth } from "@/src/auth";
 
 const TABS: { key: Trip["category"]; label: string }[] = [
   { key: "upcoming", label: "Upcoming" },
@@ -29,9 +30,10 @@ const PLACEHOLDER = require("../assets/images/travel-space-cover.png");
 export default function Home() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { user, isLocal, signIn, signOut } = useAuth();
   const [tab, setTab] = React.useState<Trip["category"]>("upcoming");
   const { data, isLoading, refetch, isRefetching } = useQuery<Trip[]>({
-    queryKey: ["trips"],
+    queryKey: ["trips", isLocal ? "local" : "remote"],
     queryFn: api.listTrips,
   });
 
@@ -54,6 +56,13 @@ export default function Home() {
           >
             <Icon name="help-circle-outline" size={22} color={colors.onSurface} />
           </Pressable>
+          <Pressable
+            testID="logout-btn"
+            onPress={isLocal ? signIn : signOut}
+            style={s.helpBtn}
+          >
+            <Icon name={isLocal ? "login" : "logout"} size={20} color={colors.onSurface} />
+          </Pressable>
         </View>
       </View>
 
@@ -74,6 +83,16 @@ export default function Home() {
           })}
         </View>
       </View>
+
+      {isLocal ? (
+        <View style={s.guestBanner} testID="guest-banner">
+          <Icon name="cloud-off-outline" size={14} color={colors.onBrandTertiary} />
+          <Text style={s.guestBannerTxt}>Guest mode · saved on this device only</Text>
+          <Pressable onPress={signIn} testID="guest-signin-btn">
+            <Text style={s.guestBannerLink}>Sign in</Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       <FlatList
         data={trips}
@@ -96,7 +115,7 @@ export default function Home() {
             </View>
           ) : null
         }
-        renderItem={({ item }) => <TripCard trip={item} onPress={() => router.push(`/trip/${item.id}`)} />}
+        renderItem={({ item }) => <TripCard trip={item} currentUserId={user?.user_id} onPress={() => router.push(`/trip/${item.id}`)} />}
       />
 
       <Pressable
@@ -110,11 +129,17 @@ export default function Home() {
   );
 }
 
-function TripCard({ trip, onPress }: { trip: Trip; onPress: () => void }) {
+function TripCard({ trip, onPress, currentUserId }: { trip: Trip; onPress: () => void; currentUserId?: string }) {
   const dateRange =
     trip.start_date && trip.end_date
       ? `${niceDate(trip.start_date)} – ${niceDate(trip.end_date)}`
       : "Dates to be planned";
+  // Shared with you = current user is a collaborator but NOT the owner
+  const sharedWithYou =
+    !!currentUserId && trip.user_id !== currentUserId && Array.isArray(trip.collaborators) && trip.collaborators.includes(currentUserId);
+  // Shared by you = owner AND has collaborators
+  const sharedByYou =
+    !!currentUserId && trip.user_id === currentUserId && Array.isArray(trip.collaborators) && trip.collaborators.length > 0;
 
   const countdown = React.useMemo(() => {
     if (!trip.start_date || trip.category !== "upcoming") return null;
@@ -146,14 +171,25 @@ function TripCard({ trip, onPress }: { trip: Trip; onPress: () => void }) {
         transition={200}
       />
       <LinearGradient
-        colors={["transparent", "rgba(0,0,0,0.2)", "rgba(0,0,0,0.75)"]}
-        locations={[0, 0.5, 1]}
+        colors={["rgba(0,0,0,0.15)", "rgba(0,0,0,0.35)", "rgba(0,0,0,0.85)"]}
+        locations={[0, 0.45, 1]}
         style={StyleSheet.absoluteFillObject}
       />
       {countdown ? (
         <View style={s.countdownBadge} testID={`countdown-${trip.id}`}>
           <Icon name="clock-outline" size={12} color={colors.onBrandPrimary} />
           <Text style={s.countdownTxt}>{countdown}</Text>
+        </View>
+      ) : null}
+      {sharedWithYou ? (
+        <View style={[s.sharedBadge, { top: countdown ? spacing.md + 32 : spacing.md }]}>
+          <Icon name="account-multiple" size={11} color="#fff" />
+          <Text style={s.sharedBadgeTxt}>Shared with you</Text>
+        </View>
+      ) : sharedByYou ? (
+        <View style={[s.sharedBadge, { top: countdown ? spacing.md + 32 : spacing.md }]}>
+          <Icon name="account-multiple-plus" size={11} color="#fff" />
+          <Text style={s.sharedBadgeTxt}>{trip.collaborators!.length + 1} people</Text>
         </View>
       ) : null}
       <View style={s.cardOverlay}>
@@ -199,6 +235,19 @@ const s = StyleSheet.create({
   },
   segmentText: { fontSize: 14, color: colors.muted, fontWeight: "500" },
   segmentTextActive: { color: colors.onSurface, fontWeight: "600" },
+  guestBanner: {
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.md,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 8,
+    borderRadius: radius.pill,
+    backgroundColor: colors.brandTertiary,
+  },
+  guestBannerTxt: { flex: 1, color: colors.onBrandTertiary, fontSize: 12, fontWeight: "500" },
+  guestBannerLink: { color: colors.brandPrimary, fontSize: 12, fontWeight: "700" },
   card: {
     height: 220,
     borderRadius: radius.lg,
@@ -212,9 +261,31 @@ const s = StyleSheet.create({
     right: spacing.lg,
     bottom: spacing.lg,
   },
-  cardTitle: { color: "#FFFFFF", fontSize: 24, fontWeight: "700", letterSpacing: -0.3 },
-  cardDest: { color: "rgba(255,255,255,0.9)", fontSize: 14, marginTop: 4 },
-  cardDates: { color: "rgba(255,255,255,0.75)", fontSize: 13, marginTop: 6 },
+  cardTitle: {
+    color: "#FFFFFF",
+    fontSize: 24,
+    fontWeight: "700",
+    letterSpacing: -0.3,
+    textShadowColor: "rgba(0,0,0,0.55)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 6,
+  },
+  cardDest: {
+    color: "rgba(255,255,255,0.95)",
+    fontSize: 14,
+    marginTop: 4,
+    textShadowColor: "rgba(0,0,0,0.5)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+  },
+  cardDates: {
+    color: "rgba(255,255,255,0.9)",
+    fontSize: 13,
+    marginTop: 6,
+    textShadowColor: "rgba(0,0,0,0.5)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+  },
   countdownBadge: {
     position: "absolute",
     top: spacing.md,
@@ -228,6 +299,18 @@ const s = StyleSheet.create({
     backgroundColor: colors.brandPrimary,
   },
   countdownTxt: { color: colors.onBrandPrimary, fontSize: 11, fontWeight: "600" },
+  sharedBadge: {
+    position: "absolute",
+    right: spacing.md,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: radius.pill,
+    backgroundColor: "rgba(0,0,0,0.55)",
+  },
+  sharedBadgeTxt: { color: "#fff", fontSize: 10, fontWeight: "700", letterSpacing: 0.3 },
   empty: {
     alignItems: "center",
     paddingTop: 80,
