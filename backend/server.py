@@ -1,10 +1,12 @@
-from fastapi import FastAPI, APIRouter, HTTPException
+from fastapi import FastAPI, APIRouter, HTTPException, Query
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import json
 import logging
+import base64
+import httpx
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional, Literal
@@ -23,6 +25,9 @@ api_router = APIRouter(prefix="/api")
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
 
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+
 
 # ============= MODELS =============
 
@@ -34,14 +39,22 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def gen_share_id() -> str:
+    # short readable share id
+    return uuid.uuid4().hex[:10]
+
+
 class Layover(BaseModel):
     location: str = ""
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
     arrival_datetime: str = ""
     departure_datetime: str = ""
 
 
 class Trip(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    share_id: str = Field(default_factory=gen_share_id)
     name: str
     destination: str = ""
     start_date: str = ""
@@ -82,8 +95,12 @@ class Flight(BaseModel):
     flight_number: str = ""
     airline: str = ""
     departure_location: str = ""
+    departure_latitude: Optional[float] = None
+    departure_longitude: Optional[float] = None
     departure_datetime: str = ""
     arrival_location: str = ""
+    arrival_latitude: Optional[float] = None
+    arrival_longitude: Optional[float] = None
     arrival_datetime: str = ""
     layovers: List[Layover] = Field(default_factory=list)
     booking_status: BookingStatus = "not_booked"
@@ -97,8 +114,12 @@ class Transport(BaseModel):
     trip_id: str
     transport_type: Literal["car", "bus", "ferry", "train", "other"] = "car"
     departure_location: str = ""
+    departure_latitude: Optional[float] = None
+    departure_longitude: Optional[float] = None
     departure_datetime: str = ""
     arrival_location: str = ""
+    arrival_latitude: Optional[float] = None
+    arrival_longitude: Optional[float] = None
     arrival_datetime: str = ""
     booking_status: BookingStatus = "not_booked"
     ticket_id: str = ""
@@ -111,6 +132,8 @@ class Stay(BaseModel):
     trip_id: str
     accommodation_name: str = ""
     location: str = ""
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
     checkin_datetime: str = ""
     checkout_datetime: str = ""
     booking_link: str = ""
@@ -128,6 +151,8 @@ class Attraction(BaseModel):
     website_link: str = ""
     activity_datetime: str = ""
     location: str = ""
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
     booking_status: BookingStatus = "not_booked"
     ticket_id: str = ""
     cost: float = 0.0
@@ -146,15 +171,52 @@ class Ticket(BaseModel):
 
 # ============= HELPERS =============
 
-def clean_doc(doc: dict) -> dict:
-    if doc and "_id" in doc:
-        doc = {k: v for k, v in doc.items() if k != "_id"}
-    return doc
-
-
 async def cascade_delete_trip(trip_id: str):
     for col in ["flights", "transport", "stays", "attractions", "tickets"]:
         await db[col].delete_many({"trip_id": trip_id})
+
+
+TICKET_COLLECTIONS = {
+    "flight": "flights",
+    "transport": "transport",
+    "stay": "stays",
+    "attraction": "attractions",
+}
+
+
+async def sync_ticket_link(ticket: dict):
+    """Ensure the linked item's `ticket_id` matches this ticket and no stale links remain."""
+    ticket_id = ticket.get("id")
+    if not ticket_id:
+        return
+    linked_col = TICKET_COLLECTIONS.get(ticket.get("ticket_type", ""))
+    linked_item_id = ticket.get("linked_item_id") or ""
+
+    # Clear any stale ticket_id references across all collections
+    for col in TICKET_COLLECTIONS.values():
+        if col == linked_col and linked_item_id:
+            await db[col].update_many(
+                {"ticket_id": ticket_id, "id": {"$ne": linked_item_id}},
+                {"$set": {"ticket_id": ""}},
+            )
+        else:
+            await db[col].update_many({"ticket_id": ticket_id}, {"$set": {"ticket_id": ""}})
+
+    # Set the fresh link
+    if linked_col and linked_item_id:
+        await db[linked_col].update_one({"id": linked_item_id}, {"$set": {"ticket_id": ticket_id}})
+
+
+async def clear_item_from_tickets(item_id: str):
+    await db.tickets.update_many({"linked_item_id": item_id}, {"$set": {"linked_item_id": ""}})
+
+
+async def ensure_share_id(doc: dict) -> dict:
+    if not doc.get("share_id"):
+        share_id = gen_share_id()
+        await db.trips.update_one({"id": doc["id"]}, {"$set": {"share_id": share_id}})
+        doc["share_id"] = share_id
+    return doc
 
 
 # ============= TRIP ENDPOINTS =============
@@ -167,7 +229,11 @@ async def root():
 @api_router.get("/trips", response_model=List[Trip])
 async def list_trips():
     trips = await db.trips.find({}, {"_id": 0}).to_list(1000)
-    return [Trip(**t) for t in trips]
+    result = []
+    for t in trips:
+        t = await ensure_share_id(t)
+        result.append(Trip(**t))
+    return result
 
 
 @api_router.post("/trips", response_model=Trip)
@@ -182,6 +248,7 @@ async def get_trip(trip_id: str):
     doc = await db.trips.find_one({"id": trip_id}, {"_id": 0})
     if not doc:
         raise HTTPException(404, "Trip not found")
+    doc = await ensure_share_id(doc)
     return Trip(**doc)
 
 
@@ -193,6 +260,7 @@ async def update_trip(trip_id: str, data: TripUpdate):
     doc = await db.trips.find_one({"id": trip_id}, {"_id": 0})
     if not doc:
         raise HTTPException(404, "Trip not found")
+    doc = await ensure_share_id(doc)
     return Trip(**doc)
 
 
@@ -203,16 +271,7 @@ async def delete_trip(trip_id: str):
     return {"ok": True}
 
 
-# ============= GENERIC SUB-ITEM ENDPOINTS =============
-
-COLLECTIONS = {
-    "flights": (Flight, "flights"),
-    "transport": (Transport, "transport"),
-    "stays": (Stay, "stays"),
-    "attractions": (Attraction, "attractions"),
-    "tickets": (Ticket, "tickets"),
-}
-
+# ============= SUB-ITEMS =============
 
 @api_router.get("/trips/{trip_id}/flights", response_model=List[Flight])
 async def list_flights(trip_id: str):
@@ -242,6 +301,7 @@ async def update_flight(item_id: str, data: Flight):
 @api_router.delete("/flights/{item_id}")
 async def delete_flight(item_id: str):
     await db.flights.delete_one({"id": item_id})
+    await clear_item_from_tickets(item_id)
     return {"ok": True}
 
 
@@ -273,6 +333,7 @@ async def update_transport(item_id: str, data: Transport):
 @api_router.delete("/transport/{item_id}")
 async def delete_transport(item_id: str):
     await db.transport.delete_one({"id": item_id})
+    await clear_item_from_tickets(item_id)
     return {"ok": True}
 
 
@@ -304,6 +365,7 @@ async def update_stay(item_id: str, data: Stay):
 @api_router.delete("/stays/{item_id}")
 async def delete_stay(item_id: str):
     await db.stays.delete_one({"id": item_id})
+    await clear_item_from_tickets(item_id)
     return {"ok": True}
 
 
@@ -335,6 +397,7 @@ async def update_attraction(item_id: str, data: Attraction):
 @api_router.delete("/attractions/{item_id}")
 async def delete_attraction(item_id: str):
     await db.attractions.delete_one({"id": item_id})
+    await clear_item_from_tickets(item_id)
     return {"ok": True}
 
 
@@ -350,6 +413,7 @@ async def create_ticket(trip_id: str, data: Ticket):
     if not data.id:
         data.id = str(uuid.uuid4())
     await db.tickets.insert_one(data.dict())
+    await sync_ticket_link(data.dict())
     return data
 
 
@@ -360,16 +424,88 @@ async def update_ticket(item_id: str, data: Ticket):
     doc = await db.tickets.find_one({"id": item_id}, {"_id": 0})
     if not doc:
         raise HTTPException(404, "Not found")
+    await sync_ticket_link(doc)
     return Ticket(**doc)
 
 
 @api_router.delete("/tickets/{item_id}")
 async def delete_ticket(item_id: str):
+    # Clear ticket_id on any item that referenced this ticket
+    for col in TICKET_COLLECTIONS.values():
+        await db[col].update_many({"ticket_id": item_id}, {"$set": {"ticket_id": ""}})
     await db.tickets.delete_one({"id": item_id})
     return {"ok": True}
 
 
-# ============= AI FLIGHT PARSE =============
+# ============= PUBLIC SHARE =============
+
+@api_router.get("/public/trips/{share_id}")
+async def public_trip(share_id: str):
+    trip = await db.trips.find_one({"share_id": share_id}, {"_id": 0})
+    if not trip:
+        raise HTTPException(404, "Not found")
+    trip_id = trip["id"]
+    flights = await db.flights.find({"trip_id": trip_id}, {"_id": 0}).to_list(1000)
+    transport = await db.transport.find({"trip_id": trip_id}, {"_id": 0}).to_list(1000)
+    stays = await db.stays.find({"trip_id": trip_id}, {"_id": 0}).to_list(1000)
+    attractions = await db.attractions.find({"trip_id": trip_id}, {"_id": 0}).to_list(1000)
+    tickets = await db.tickets.find({"trip_id": trip_id}, {"_id": 0}).to_list(1000)
+    return {
+        "trip": trip,
+        "flights": flights,
+        "transport": transport,
+        "stays": stays,
+        "attractions": attractions,
+        "tickets": tickets,
+    }
+
+
+# ============= GEOCODE (Nominatim proxy) =============
+
+@api_router.get("/geocode")
+async def geocode(q: str = Query(..., min_length=2)):
+    """Forward geocode using OpenStreetMap Nominatim (free, no key)."""
+    async with httpx.AsyncClient(timeout=15) as http:
+        try:
+            r = await http.get(
+                "https://nominatim.openstreetmap.org/search",
+                params={"q": q, "format": "json", "limit": 5, "addressdetails": 1},
+                headers={"User-Agent": "WanderPlan/1.0 (travel-app)"},
+            )
+            r.raise_for_status()
+            data = r.json()
+        except Exception as e:
+            logger.error(f"geocode error: {e}")
+            return {"results": []}
+    results = [
+        {
+            "display_name": item.get("display_name", ""),
+            "latitude": float(item["lat"]),
+            "longitude": float(item["lon"]),
+        }
+        for item in data
+        if item.get("lat") and item.get("lon")
+    ]
+    return {"results": results}
+
+
+@api_router.get("/reverse-geocode")
+async def reverse_geocode(lat: float, lon: float):
+    async with httpx.AsyncClient(timeout=15) as http:
+        try:
+            r = await http.get(
+                "https://nominatim.openstreetmap.org/reverse",
+                params={"lat": lat, "lon": lon, "format": "json"},
+                headers={"User-Agent": "WanderPlan/1.0 (travel-app)"},
+            )
+            r.raise_for_status()
+            data = r.json()
+        except Exception:
+            return {"display_name": ""}
+    return {"display_name": data.get("display_name", ""), "latitude": lat, "longitude": lon}
+
+
+# ============= AI FLIGHT PARSE (text-only, legacy) =============
 
 class ParseFlightRequest(BaseModel):
     text: str
@@ -385,24 +521,42 @@ class ParsedFlight(BaseModel):
     layovers: List[Layover] = Field(default_factory=list)
 
 
+def _strip_code_fence(text: str) -> str:
+    text = (text or "").strip()
+    if text.startswith("```"):
+        text = text.strip("`")
+        if text.lower().startswith("json"):
+            text = text[4:]
+        text = text.strip()
+    return text
+
+
+def _extract_json(text: str) -> dict:
+    text = _strip_code_fence(text)
+    try:
+        return json.loads(text)
+    except Exception:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start >= 0 and end > start:
+            return json.loads(text[start:end + 1])
+        raise
+
+
 @api_router.post("/ai/parse-flight", response_model=ParsedFlight)
 async def parse_flight(req: ParseFlightRequest):
     if not EMERGENT_LLM_KEY:
         raise HTTPException(500, "LLM key not configured")
 
-    try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
-    except Exception as e:
-        raise HTTPException(500, f"LLM library error: {e}")
+    from emergentintegrations.llm.chat import LlmChat, UserMessage
 
     system_msg = (
         "You extract flight details from booking confirmation text. "
-        "Return ONLY a strict JSON object with these keys: "
-        "flight_number (string), airline (string), departure_location (string, city/airport), "
-        "departure_datetime (ISO 8601 like 2025-06-01T09:30), "
-        "arrival_location (string), arrival_datetime (ISO 8601), "
-        "layovers (array of objects with keys: location, arrival_datetime, departure_datetime). "
-        "If any field is missing, use empty string. Output JSON only, no code fences."
+        "Return ONLY strict JSON with keys: flight_number, airline, "
+        "departure_location, departure_datetime (ISO 8601 like 2025-06-01T09:30), "
+        "arrival_location, arrival_datetime (ISO 8601), "
+        "layovers (array of {location, arrival_datetime, departure_datetime}). "
+        "Missing fields = empty string. No code fences."
     )
 
     chat = LlmChat(
@@ -417,27 +571,109 @@ async def parse_flight(req: ParseFlightRequest):
         raise HTTPException(500, f"LLM call failed: {e}")
 
     text = response if isinstance(response, str) else str(response)
-    text = text.strip()
-    if text.startswith("```"):
-        text = text.strip("`")
-        if text.startswith("json"):
-            text = text[4:]
-        text = text.strip()
+    try:
+        data = _extract_json(text)
+    except Exception:
+        raise HTTPException(500, "Could not parse LLM response")
+    return ParsedFlight(**data)
+
+
+# ============= UNIVERSAL BOOKING PARSE (text + image) =============
+
+class ParseBookingRequest(BaseModel):
+    text: Optional[str] = None
+    image_base64: Optional[str] = None
+    mime: Optional[str] = "image/jpeg"
+
+
+class ParsedBooking(BaseModel):
+    category: Literal["flight", "transport", "stay", "attraction", "unknown"] = "unknown"
+    data: dict = Field(default_factory=dict)
+    confidence: float = 0.0
+    ticket: dict = Field(default_factory=dict)
+
+
+UNIVERSAL_SYSTEM = """You are an assistant that extracts travel booking details from text or images (screenshots of booking confirmations).
+
+Classify the booking into one of these categories and extract fields.
+
+Return ONLY a strict JSON object with this shape:
+{
+  "category": "flight" | "transport" | "stay" | "attraction" | "unknown",
+  "data": { ... category-specific fields ... },
+  "ticket": { "cost": number, "details": string, "link": string, "confirmation": string },
+  "confidence": number between 0 and 1
+}
+
+Category-specific fields (all optional strings unless noted; missing = empty):
+
+flight:
+  airline, flight_number, departure_location, departure_datetime (ISO 8601), arrival_location, arrival_datetime (ISO 8601),
+  layovers: array of { location, arrival_datetime, departure_datetime }
+
+transport:
+  transport_type: one of "car","bus","train","ferry","other",
+  departure_location, departure_datetime, arrival_location, arrival_datetime, notes
+
+stay:
+  accommodation_name, location, checkin_datetime, checkout_datetime, booking_link, breakfast_included (bool), dinner_included (bool)
+
+attraction:
+  name, location, activity_datetime, website_link
+
+Rules:
+- Use ISO 8601 for all dates/times, e.g. 2026-06-01T09:30.
+- If the source shows only a date, use T00:00 for time.
+- Cost should be a number in the currency shown (do not convert).
+- No code fences, no commentary. JSON only.
+"""
+
+
+@api_router.post("/ai/parse-booking", response_model=ParsedBooking)
+async def parse_booking(req: ParseBookingRequest):
+    if not EMERGENT_LLM_KEY:
+        raise HTTPException(500, "LLM key not configured")
+    if not req.text and not req.image_base64:
+        raise HTTPException(400, "Provide text or image_base64")
+
+    from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+
+    chat = LlmChat(
+        api_key=EMERGENT_LLM_KEY,
+        session_id=f"parse-booking-{uuid.uuid4()}",
+        system_message=UNIVERSAL_SYSTEM,
+    ).with_model("openai", "gpt-5.4")
+
+    text_prompt = req.text or "Extract the booking details from this image."
+    file_contents = []
+    if req.image_base64:
+        # strip data URL prefix if present
+        b64 = req.image_base64
+        if b64.startswith("data:"):
+            b64 = b64.split(",", 1)[1]
+        file_contents.append(ImageContent(image_base64=b64))
+
+    msg = UserMessage(text=text_prompt, file_contents=file_contents) if file_contents else UserMessage(text=text_prompt)
 
     try:
-        data = json.loads(text)
-    except Exception:
-        start = text.find("{")
-        end = text.rfind("}")
-        if start >= 0 and end > start:
-            try:
-                data = json.loads(text[start:end + 1])
-            except Exception:
-                raise HTTPException(500, "Could not parse LLM response")
-        else:
-            raise HTTPException(500, "Could not parse LLM response")
+        response = await chat.send_message(msg)
+    except Exception as e:
+        logger.error(f"parse-booking LLM error: {e}")
+        raise HTTPException(500, f"LLM call failed: {e}")
 
-    return ParsedFlight(**data)
+    text_out = response if isinstance(response, str) else str(response)
+    try:
+        parsed = _extract_json(text_out)
+    except Exception:
+        logger.error(f"parse-booking bad JSON: {text_out[:400]}")
+        raise HTTPException(500, "Could not parse LLM response")
+
+    return ParsedBooking(
+        category=parsed.get("category", "unknown"),
+        data=parsed.get("data", {}) or {},
+        ticket=parsed.get("ticket", {}) or {},
+        confidence=float(parsed.get("confidence", 0)),
+    )
 
 
 # ============= APP SETUP =============
@@ -451,12 +687,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
 
 
 @app.on_event("shutdown")

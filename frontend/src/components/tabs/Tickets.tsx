@@ -9,6 +9,7 @@ import { api, type Attraction, type Flight, type Stay, type Ticket, type Transpo
 import { colors, radius, spacing } from "@/src/theme";
 import { Field, Input } from "@/src/components/form";
 import { FormModal, ListWrapper } from "@/src/components/tab-shell";
+import type { TabNav } from "@/app/trip/[id]";
 
 const TYPES: { key: Ticket["ticket_type"]; label: string; icon: string }[] = [
   { key: "flight", label: "Flight", icon: "airplane" },
@@ -19,45 +20,28 @@ const TYPES: { key: Ticket["ticket_type"]; label: string; icon: string }[] = [
 ];
 
 const empty = (trip_id: string): Ticket => ({
-  id: "",
-  trip_id,
-  link: "",
-  photo: "",
-  cost: 0,
-  details: "",
-  ticket_type: "other",
-  linked_item_id: "",
+  id: "", trip_id, link: "", photo: "", cost: 0, details: "",
+  ticket_type: "other", linked_item_id: "",
 });
 
-export default function TicketsTab({ trip }: { trip: Trip }) {
+export default function TicketsTab({ trip, nav }: { trip: Trip; nav: TabNav }) {
   const qc = useQueryClient();
   const [modal, setModal] = React.useState<Ticket | null>(null);
 
-  const { data: tickets = [] } = useQuery<Ticket[]>({
-    queryKey: ["tickets", trip.id],
-    queryFn: () => api.list("tickets", trip.id),
-  });
-  const { data: flights = [] } = useQuery<Flight[]>({
-    queryKey: ["flights", trip.id],
-    queryFn: () => api.list("flights", trip.id),
-  });
-  const { data: transport = [] } = useQuery<Transport[]>({
-    queryKey: ["transport", trip.id],
-    queryFn: () => api.list("transport", trip.id),
-  });
-  const { data: stays = [] } = useQuery<Stay[]>({
-    queryKey: ["stays", trip.id],
-    queryFn: () => api.list("stays", trip.id),
-  });
-  const { data: attractions = [] } = useQuery<Attraction[]>({
-    queryKey: ["attractions", trip.id],
-    queryFn: () => api.list("attractions", trip.id),
-  });
+  const { data: tickets = [] } = useQuery<Ticket[]>({ queryKey: ["tickets", trip.id], queryFn: () => api.list("tickets", trip.id) });
+  const { data: flights = [] } = useQuery<Flight[]>({ queryKey: ["flights", trip.id], queryFn: () => api.list("flights", trip.id) });
+  const { data: transport = [] } = useQuery<Transport[]>({ queryKey: ["transport", trip.id], queryFn: () => api.list("transport", trip.id) });
+  const { data: stays = [] } = useQuery<Stay[]>({ queryKey: ["stays", trip.id], queryFn: () => api.list("stays", trip.id) });
+  const { data: attractions = [] } = useQuery<Attraction[]>({ queryKey: ["attractions", trip.id], queryFn: () => api.list("attractions", trip.id) });
 
   const save = useMutation({
     mutationFn: async (t: Ticket) => (t.id ? api.update("tickets", t.id, t) : api.create("tickets", trip.id, t)),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["tickets", trip.id] });
+      qc.invalidateQueries({ queryKey: ["flights", trip.id] });
+      qc.invalidateQueries({ queryKey: ["transport", trip.id] });
+      qc.invalidateQueries({ queryKey: ["stays", trip.id] });
+      qc.invalidateQueries({ queryKey: ["attractions", trip.id] });
       setModal(null);
     },
   });
@@ -65,23 +49,19 @@ export default function TicketsTab({ trip }: { trip: Trip }) {
     mutationFn: (id: string) => api.remove("tickets", id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["tickets", trip.id] });
+      qc.invalidateQueries({ queryKey: ["flights", trip.id] });
+      qc.invalidateQueries({ queryKey: ["transport", trip.id] });
+      qc.invalidateQueries({ queryKey: ["stays", trip.id] });
+      qc.invalidateQueries({ queryKey: ["attractions", trip.id] });
       setModal(null);
     },
   });
 
   const pickPhoto = async () => {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert("Permission needed", "Please allow photo access.");
-      return;
-    }
-    const res = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.8,
-    });
-    if (!res.canceled && res.assets[0] && modal) {
-      setModal({ ...modal, photo: res.assets[0].uri });
-    }
+    if (!perm.granted) { Alert.alert("Permission needed", "Please allow photo access."); return; }
+    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.8 });
+    if (!res.canceled && res.assets[0] && modal) setModal({ ...modal, photo: res.assets[0].uri });
   };
 
   const linkOptions = (type: Ticket["ticket_type"]) => {
@@ -90,6 +70,12 @@ export default function TicketsTab({ trip }: { trip: Trip }) {
     if (type === "stay") return stays.map((t) => ({ id: t.id, label: t.accommodation_name || "Stay" }));
     if (type === "attraction") return attractions.map((t) => ({ id: t.id, label: t.name || "Attraction" }));
     return [];
+  };
+
+  const linkedLabel = (ticket: Ticket): string | null => {
+    if (!ticket.linked_item_id) return null;
+    const opts = linkOptions(ticket.ticket_type);
+    return opts.find((o) => o.id === ticket.linked_item_id)?.label || null;
   };
 
   return (
@@ -104,8 +90,10 @@ export default function TicketsTab({ trip }: { trip: Trip }) {
       >
         {tickets.map((t) => {
           const typeIcon = TYPES.find((x) => x.key === t.ticket_type)?.icon || "ticket-outline";
+          const linked = linkedLabel(t);
+          const focused = nav.focusId === t.id;
           return (
-            <Pressable key={t.id} onPress={() => setModal(t)} style={s.card} testID={`ticket-${t.id}`}>
+            <Pressable key={t.id} onPress={() => setModal(t)} style={[s.card, focused && s.cardFocused]} testID={`ticket-${t.id}`}>
               {t.photo ? (
                 <Image source={{ uri: t.photo }} style={s.photo} contentFit="cover" />
               ) : (
@@ -126,6 +114,17 @@ export default function TicketsTab({ trip }: { trip: Trip }) {
                     <Text style={s.linkTxt} numberOfLines={1}>{t.link}</Text>
                   </Pressable>
                 )}
+                {linked && (t.ticket_type === "flight" || t.ticket_type === "transport" || t.ticket_type === "stay" || t.ticket_type === "attraction") ? (
+                  <Pressable
+                    onPress={(e) => { e.stopPropagation?.(); nav.goToItem(t.ticket_type as any, t.linked_item_id); }}
+                    style={s.linkChip}
+                    testID={`view-item-${t.id}`}
+                  >
+                    <Icon name={typeIcon as any} size={14} color={colors.brandPrimary} />
+                    <Text style={s.linkChipTxt} numberOfLines={1}>View {t.ticket_type}: {linked}</Text>
+                    <Icon name="chevron-right" size={14} color={colors.brandPrimary} />
+                  </Pressable>
+                ) : null}
               </View>
             </Pressable>
           );
@@ -160,12 +159,7 @@ export default function TicketsTab({ trip }: { trip: Trip }) {
                 {TYPES.map((tp) => {
                   const active = modal.ticket_type === tp.key;
                   return (
-                    <Pressable
-                      key={tp.key}
-                      testID={`ticket-type-${tp.key}`}
-                      onPress={() => setModal({ ...modal, ticket_type: tp.key, linked_item_id: "" })}
-                      style={[s.typeChip, active && s.typeChipActive]}
-                    >
+                    <Pressable key={tp.key} testID={`ticket-type-${tp.key}`} onPress={() => setModal({ ...modal, ticket_type: tp.key, linked_item_id: "" })} style={[s.typeChip, active && s.typeChipActive]}>
                       <Icon name={tp.icon as any} size={14} color={active ? colors.onBrandPrimary : colors.onSurface} />
                       <Text style={[s.typeText, active && { color: colors.onBrandPrimary }]}>{tp.label}</Text>
                     </Pressable>
@@ -178,9 +172,7 @@ export default function TicketsTab({ trip }: { trip: Trip }) {
               <Field label={`Link to a ${modal.ticket_type}`}>
                 <View style={{ gap: 6 }}>
                   {linkOptions(modal.ticket_type).length === 0 ? (
-                    <Text style={{ color: colors.muted, fontSize: 13 }}>
-                      Nothing to link. Add a {modal.ticket_type} first.
-                    </Text>
+                    <Text style={{ color: colors.muted, fontSize: 13 }}>Nothing to link. Add a {modal.ticket_type} first.</Text>
                   ) : (
                     linkOptions(modal.ticket_type).map((opt) => {
                       const active = opt.id === modal.linked_item_id;
@@ -190,14 +182,8 @@ export default function TicketsTab({ trip }: { trip: Trip }) {
                           onPress={() => setModal({ ...modal, linked_item_id: active ? "" : opt.id })}
                           style={[s.linkOption, active && s.linkOptionActive]}
                         >
-                          <Icon
-                            name={active ? "check-circle" : "circle-outline"}
-                            size={18}
-                            color={active ? colors.brandPrimary : colors.muted}
-                          />
-                          <Text style={[s.linkOptTxt, active && { color: colors.onSurface, fontWeight: "600" }]}>
-                            {opt.label}
-                          </Text>
+                          <Icon name={active ? "check-circle" : "circle-outline"} size={18} color={active ? colors.brandPrimary : colors.muted} />
+                          <Text style={[s.linkOptTxt, active && { color: colors.onSurface, fontWeight: "600" }]}>{opt.label}</Text>
                         </Pressable>
                       );
                     })
@@ -223,52 +209,24 @@ export default function TicketsTab({ trip }: { trip: Trip }) {
 }
 
 const s = StyleSheet.create({
-  card: {
-    borderRadius: radius.md,
-    backgroundColor: colors.surfaceSecondary,
-    borderWidth: 1,
-    borderColor: colors.border,
-    overflow: "hidden",
-  },
+  card: { borderRadius: radius.md, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border, overflow: "hidden" },
+  cardFocused: { borderColor: colors.brandPrimary, borderWidth: 2 },
   photo: { width: "100%", height: 160 },
   typeLabel: { fontSize: 11, fontWeight: "600", color: colors.brandPrimary, letterSpacing: 0.5 },
   cost: { fontSize: 11, color: colors.muted, fontWeight: "600" },
   details: { fontSize: 14, color: colors.onSurface },
   linkTxt: { color: colors.brandPrimary, fontSize: 12, flex: 1 },
-  photoPicker: {
-    height: 180,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderStyle: "dashed",
-    backgroundColor: colors.surfaceTertiary,
-    alignItems: "center",
-    justifyContent: "center",
-    overflow: "hidden",
+  linkChip: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    marginTop: spacing.xs, paddingHorizontal: spacing.md, paddingVertical: 8,
+    borderRadius: radius.pill, backgroundColor: colors.brandTertiary,
   },
-  typeChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surfaceSecondary,
-  },
+  linkChipTxt: { color: colors.onBrandTertiary, fontSize: 12, fontWeight: "600", flex: 1 },
+  photoPicker: { height: 180, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, borderStyle: "dashed", backgroundColor: colors.surfaceTertiary, alignItems: "center", justifyContent: "center", overflow: "hidden" },
+  typeChip: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceSecondary },
   typeChipActive: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
   typeText: { color: colors.onSurface, fontSize: 13, fontWeight: "500" },
-  linkOption: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    padding: spacing.md,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surfaceSecondary,
-  },
+  linkOption: { flexDirection: "row", alignItems: "center", gap: 8, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceSecondary },
   linkOptionActive: { borderColor: colors.brandPrimary },
   linkOptTxt: { color: colors.onSurfaceSecondary, flex: 1 },
 });

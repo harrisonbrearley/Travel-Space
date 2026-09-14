@@ -5,8 +5,6 @@ import {
   StyleSheet,
   ScrollView,
   Pressable,
-  Animated,
-  Dimensions,
 } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
@@ -18,8 +16,11 @@ import Icon from "@react-native-vector-icons/material-design-icons";
 import { api, type Trip } from "@/src/api";
 import { colors, radius, spacing } from "@/src/theme";
 import { niceDate } from "@/src/components/form";
+import { AutoAddSheet } from "@/src/components/AutoAddSheet";
+import { ShareOptionsSheet } from "@/src/components/ShareOptionsSheet";
 
 import ItineraryTab from "@/src/components/tabs/Itinerary";
+import MapTab from "@/src/components/tabs/Map";
 import FlightsTab from "@/src/components/tabs/Flights";
 import TransportTab from "@/src/components/tabs/Transport";
 import StaysTab from "@/src/components/tabs/Stays";
@@ -29,6 +30,7 @@ import BudgetTab from "@/src/components/tabs/Budget";
 
 const TABS = [
   { key: "itinerary", label: "Itinerary", icon: "calendar-blank-outline" },
+  { key: "map", label: "Map", icon: "map-outline" },
   { key: "flights", label: "Flights", icon: "airplane" },
   { key: "transport", label: "Transport", icon: "car" },
   { key: "stays", label: "Stay", icon: "bed-outline" },
@@ -37,19 +39,48 @@ const TABS = [
   { key: "budget", label: "Budget", icon: "cash-multiple" },
 ] as const;
 
+type TabKey = (typeof TABS)[number]["key"];
+
 const PLACEHOLDER =
   "https://images.unsplash.com/photo-1624253321171-1be53e12f5f4?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxOTB8MHwxfHNlYXJjaHwxfHxLeW90byUyMEphcGFuJTIwdGVtcGxlJTIwdHJhdmVsJTIwcGhvdG9ncmFwaHl8ZW58MHx8fHwxNzg5MzcyOTMyfDA&ixlib=rb-4.1.0&q=85";
+
+export type TabNav = {
+  goToTicket: (ticketId: string) => void;
+  goToItem: (category: "flight" | "transport" | "stay" | "attraction", itemId: string) => void;
+  focusId: string;
+};
 
 export default function TripDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const [tab, setTab] = React.useState<(typeof TABS)[number]["key"]>("itinerary");
+  const [tab, setTab] = React.useState<TabKey>("itinerary");
+  const [focusId, setFocusId] = React.useState<string>("");
+  const [autoAdd, setAutoAdd] = React.useState(false);
+  const [shareSheet, setShareSheet] = React.useState(false);
 
   const { data: trip } = useQuery<Trip>({
     queryKey: ["trip", id],
     queryFn: () => api.getTrip(id),
   });
+
+  const categoryToTab: Record<string, TabKey> = {
+    flight: "flights",
+    transport: "transport",
+    stay: "stays",
+    attraction: "attractions",
+  };
+
+  const goToTicket = (ticketId: string) => {
+    setFocusId(ticketId);
+    setTab("tickets");
+  };
+  const goToItem = (category: "flight" | "transport" | "stay" | "attraction", itemId: string) => {
+    setFocusId(itemId);
+    setTab(categoryToTab[category]);
+  };
+
+  const share = () => setShareSheet(true);
 
   if (!trip) {
     return (
@@ -68,9 +99,10 @@ export default function TripDetailScreen() {
       ? `${niceDate(trip.start_date)} – ${niceDate(trip.end_date)}`
       : "Dates to be planned";
 
+  const nav: TabNav = { goToTicket, goToItem, focusId };
+
   return (
     <View style={s.root}>
-      {/* Cover header */}
       <View style={s.cover}>
         <Image
           source={{ uri: trip.cover_photo || PLACEHOLDER }}
@@ -86,13 +118,21 @@ export default function TripDetailScreen() {
           <Pressable onPress={() => router.back()} style={s.iconBtn} testID="back-btn">
             <Icon name="chevron-left" size={26} color="#fff" />
           </Pressable>
-          <Pressable
-            onPress={() => router.push({ pathname: "/trip/edit", params: { id: trip.id } })}
-            style={s.iconBtn}
-            testID="edit-trip-btn"
-          >
-            <Icon name="pencil-outline" size={22} color="#fff" />
-          </Pressable>
+          <View style={{ flexDirection: "row", gap: spacing.sm }}>
+            <Pressable onPress={() => setAutoAdd(true)} style={s.iconBtn} testID="auto-add-btn">
+              <Icon name="auto-fix" size={22} color="#fff" />
+            </Pressable>
+            <Pressable onPress={share} style={s.iconBtn} testID="share-trip-btn">
+              <Icon name="share-variant-outline" size={20} color="#fff" />
+            </Pressable>
+            <Pressable
+              onPress={() => router.push({ pathname: "/trip/edit", params: { id: trip.id } })}
+              style={s.iconBtn}
+              testID="edit-trip-btn"
+            >
+              <Icon name="pencil-outline" size={20} color="#fff" />
+            </Pressable>
+          </View>
         </View>
         <View style={s.coverBottom}>
           <Text style={s.coverTitle} numberOfLines={2}>{trip.name}</Text>
@@ -101,7 +141,6 @@ export default function TripDetailScreen() {
         </View>
       </View>
 
-      {/* Tabs bar */}
       <View style={s.tabsWrap}>
         <ScrollView
           horizontal
@@ -114,7 +153,10 @@ export default function TripDetailScreen() {
               <Pressable
                 key={t.key}
                 testID={`tab-${t.key}`}
-                onPress={() => setTab(t.key)}
+                onPress={() => {
+                  setTab(t.key);
+                  setFocusId("");
+                }}
                 style={[s.tabChip, active && s.tabChipActive]}
               >
                 <Icon
@@ -129,16 +171,33 @@ export default function TripDetailScreen() {
         </ScrollView>
       </View>
 
-      {/* Tab content */}
       <View style={{ flex: 1 }}>
         {tab === "itinerary" && <ItineraryTab trip={trip} />}
-        {tab === "flights" && <FlightsTab trip={trip} />}
-        {tab === "transport" && <TransportTab trip={trip} />}
-        {tab === "stays" && <StaysTab trip={trip} />}
-        {tab === "attractions" && <AttractionsTab trip={trip} />}
-        {tab === "tickets" && <TicketsTab trip={trip} />}
+        {tab === "map" && <MapTab trip={trip} />}
+        {tab === "flights" && <FlightsTab trip={trip} nav={nav} />}
+        {tab === "transport" && <TransportTab trip={trip} nav={nav} />}
+        {tab === "stays" && <StaysTab trip={trip} nav={nav} />}
+        {tab === "attractions" && <AttractionsTab trip={trip} nav={nav} />}
+        {tab === "tickets" && <TicketsTab trip={trip} nav={nav} />}
         {tab === "budget" && <BudgetTab trip={trip} />}
       </View>
+
+      <AutoAddSheet
+        visible={autoAdd}
+        onClose={() => setAutoAdd(false)}
+        trip={trip}
+        onDone={(cat) => {
+          setAutoAdd(false);
+          const mapped = categoryToTab[cat];
+          if (mapped) setTab(mapped);
+        }}
+      />
+
+      <ShareOptionsSheet
+        visible={shareSheet}
+        onClose={() => setShareSheet(false)}
+        trip={trip}
+      />
     </View>
   );
 }
@@ -158,7 +217,7 @@ const s = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "rgba(0,0,0,0.35)",
+    backgroundColor: "rgba(0,0,0,0.4)",
     alignItems: "center",
     justifyContent: "center",
   },

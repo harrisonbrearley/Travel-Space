@@ -1,5 +1,5 @@
 import React from "react";
-import { View, Text, StyleSheet, ScrollView, Pressable, Linking } from "react-native";
+import { View, Text, StyleSheet, ScrollView, Pressable } from "react-native";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Icon from "@react-native-vector-icons/material-design-icons";
@@ -169,7 +169,7 @@ export default function ItineraryTab({ trip }: { trip: Trip }) {
             <Icon name="calendar-blank-outline" size={44} color={colors.muted} />
             <Text style={s.emptyTitle}>Your itinerary will build itself</Text>
             <Text style={s.emptySub}>
-              Add flights, stays, transport, or attractions with dates, and they'll appear here automatically.
+              Add flights, stays, transport, or attractions with dates, and they will appear here automatically.
             </Text>
           </View>
         ) : (

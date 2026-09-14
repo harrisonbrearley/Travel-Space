@@ -105,6 +105,24 @@ function TripCard({ trip, onPress }: { trip: Trip; onPress: () => void }) {
     trip.start_date && trip.end_date
       ? `${niceDate(trip.start_date)} – ${niceDate(trip.end_date)}`
       : "Dates to be planned";
+
+  const countdown = React.useMemo(() => {
+    if (!trip.start_date || trip.category !== "upcoming") return null;
+    const start = new Date(trip.start_date);
+    const now = new Date();
+    const startDay = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const days = Math.round((startDay.getTime() - today.getTime()) / 86400000);
+    if (days > 0) return `Leaves in ${days} day${days === 1 ? "" : "s"}`;
+    if (days === 0) return "Today's the day!";
+    if (trip.end_date) {
+      const end = new Date(trip.end_date);
+      const endDay = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+      if (today <= endDay) return "On the trip";
+    }
+    return null;
+  }, [trip.start_date, trip.end_date, trip.category]);
+
   return (
     <Pressable
       testID={`trip-card-${trip.id}`}
@@ -122,6 +140,12 @@ function TripCard({ trip, onPress }: { trip: Trip; onPress: () => void }) {
         locations={[0, 0.5, 1]}
         style={StyleSheet.absoluteFillObject}
       />
+      {countdown ? (
+        <View style={s.countdownBadge} testID={`countdown-${trip.id}`}>
+          <Icon name="clock-outline" size={12} color={colors.onBrandPrimary} />
+          <Text style={s.countdownTxt}>{countdown}</Text>
+        </View>
+      ) : null}
       <View style={s.cardOverlay}>
         <Text style={s.cardTitle} numberOfLines={2}>{trip.name}</Text>
         {!!trip.destination && <Text style={s.cardDest}>{trip.destination}</Text>}
@@ -175,6 +199,19 @@ const s = StyleSheet.create({
   cardTitle: { color: "#FFFFFF", fontSize: 24, fontWeight: "700", letterSpacing: -0.3 },
   cardDest: { color: "rgba(255,255,255,0.9)", fontSize: 14, marginTop: 4 },
   cardDates: { color: "rgba(255,255,255,0.75)", fontSize: 13, marginTop: 6 },
+  countdownBadge: {
+    position: "absolute",
+    top: spacing.md,
+    right: spacing.md,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: radius.pill,
+    backgroundColor: colors.brandPrimary,
+  },
+  countdownTxt: { color: colors.onBrandPrimary, fontSize: 11, fontWeight: "600" },
   empty: {
     alignItems: "center",
     paddingTop: 80,

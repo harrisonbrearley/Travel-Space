@@ -33,10 +33,20 @@ export const api = {
   // AI
   parseFlight: (text: string) =>
     req("/ai/parse-flight", { method: "POST", body: JSON.stringify({ text }) }),
+  parseBooking: (body: { text?: string; image_base64?: string; mime?: string }) =>
+    req("/ai/parse-booking", { method: "POST", body: JSON.stringify(body) }),
+
+  // Geo
+  geocode: (q: string) => req(`/geocode?q=${encodeURIComponent(q)}`),
+  reverseGeocode: (lat: number, lon: number) => req(`/reverse-geocode?lat=${lat}&lon=${lon}`),
+
+  // Public
+  publicTrip: (shareId: string) => req(`/public/trips/${shareId}`),
 };
 
 export type Trip = {
   id: string;
+  share_id: string;
   name: string;
   destination: string;
   start_date: string;
@@ -56,10 +66,14 @@ export type Flight = {
   flight_number: string;
   airline: string;
   departure_location: string;
+  departure_latitude: number | null;
+  departure_longitude: number | null;
   departure_datetime: string;
   arrival_location: string;
+  arrival_latitude: number | null;
+  arrival_longitude: number | null;
   arrival_datetime: string;
-  layovers: { location: string; arrival_datetime: string; departure_datetime: string }[];
+  layovers: { location: string; latitude?: number | null; longitude?: number | null; arrival_datetime: string; departure_datetime: string }[];
   booking_status: BookingStatus;
   ticket_id: string;
   cost: number;
@@ -71,8 +85,12 @@ export type Transport = {
   trip_id: string;
   transport_type: "car" | "bus" | "ferry" | "train" | "other";
   departure_location: string;
+  departure_latitude: number | null;
+  departure_longitude: number | null;
   departure_datetime: string;
   arrival_location: string;
+  arrival_latitude: number | null;
+  arrival_longitude: number | null;
   arrival_datetime: string;
   booking_status: BookingStatus;
   ticket_id: string;
@@ -85,6 +103,8 @@ export type Stay = {
   trip_id: string;
   accommodation_name: string;
   location: string;
+  latitude: number | null;
+  longitude: number | null;
   checkin_datetime: string;
   checkout_datetime: string;
   booking_link: string;
@@ -102,6 +122,8 @@ export type Attraction = {
   website_link: string;
   activity_datetime: string;
   location: string;
+  latitude: number | null;
+  longitude: number | null;
   booking_status: BookingStatus;
   ticket_id: string;
   cost: number;

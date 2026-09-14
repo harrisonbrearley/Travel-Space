@@ -1,13 +1,15 @@
 import React from "react";
-import { View, Text, StyleSheet, Pressable, Alert, ActivityIndicator, Linking } from "react-native";
+import { View, Text, StyleSheet, Pressable, Alert, ActivityIndicator } from "react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Icon from "@react-native-vector-icons/material-design-icons";
 
-import { api, type Flight, type Trip } from "@/src/api";
+import { api, type Flight, type Ticket, type Trip } from "@/src/api";
 import { colors, radius, spacing } from "@/src/theme";
 import { DateTimeInput, Field, Input, niceDate, niceTime } from "@/src/components/form";
 import { StatusBadge, StatusPicker } from "@/src/components/status";
 import { FormModal, ListWrapper } from "@/src/components/tab-shell";
+import { LocationInput } from "@/src/components/LocationInput";
+import type { TabNav } from "@/app/trip/[id]";
 
 const empty = (trip_id: string): Flight => ({
   id: "",
@@ -15,8 +17,12 @@ const empty = (trip_id: string): Flight => ({
   flight_number: "",
   airline: "",
   departure_location: "",
+  departure_latitude: null,
+  departure_longitude: null,
   departure_datetime: "",
   arrival_location: "",
+  arrival_latitude: null,
+  arrival_longitude: null,
   arrival_datetime: "",
   layovers: [],
   booking_status: "not_booked",
@@ -25,7 +31,7 @@ const empty = (trip_id: string): Flight => ({
   notes: "",
 });
 
-export default function FlightsTab({ trip }: { trip: Trip }) {
+export default function FlightsTab({ trip, nav }: { trip: Trip; nav: TabNav }) {
   const qc = useQueryClient();
   const [modal, setModal] = React.useState<Flight | null>(null);
   const [aiText, setAiText] = React.useState("");
@@ -35,12 +41,13 @@ export default function FlightsTab({ trip }: { trip: Trip }) {
     queryKey: ["flights", trip.id],
     queryFn: () => api.list("flights", trip.id),
   });
+  const { data: tickets = [] } = useQuery<Ticket[]>({
+    queryKey: ["tickets", trip.id],
+    queryFn: () => api.list("tickets", trip.id),
+  });
 
   const save = useMutation({
-    mutationFn: async (f: Flight) => {
-      if (f.id) return api.update("flights", f.id, f);
-      return api.create("flights", trip.id, f);
-    },
+    mutationFn: async (f: Flight) => (f.id ? api.update("flights", f.id, f) : api.create("flights", trip.id, f)),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["flights", trip.id] });
       setModal(null);
@@ -50,6 +57,7 @@ export default function FlightsTab({ trip }: { trip: Trip }) {
     mutationFn: (id: string) => api.remove("flights", id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["flights", trip.id] });
+      qc.invalidateQueries({ queryKey: ["tickets", trip.id] });
       setModal(null);
     },
   });
@@ -60,9 +68,7 @@ export default function FlightsTab({ trip }: { trip: Trip }) {
       setShowAI(false);
       setAiText("");
     },
-    onError: (e: any) => {
-      Alert.alert("Parse failed", "Could not extract flight details. Try again or fill manually.");
-    },
+    onError: () => Alert.alert("Parse failed", "Try again or fill manually."),
   });
 
   return (
@@ -75,41 +81,57 @@ export default function FlightsTab({ trip }: { trip: Trip }) {
         addLabel="Add flight"
         testID="add-flight-fab"
       >
-        {flights.map((f) => (
-          <Pressable
-            key={f.id}
-            testID={`flight-${f.id}`}
-            onPress={() => setModal(f)}
-            style={s.card}
-          >
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                <Icon name="airplane" size={18} color={colors.brandPrimary} />
-                <Text style={s.flightNum}>{f.airline || "Flight"} {f.flight_number}</Text>
+        {flights.map((f) => {
+          const ticket = tickets.find((t) => t.id === f.ticket_id);
+          const focused = nav.focusId === f.id;
+          return (
+            <Pressable
+              key={f.id}
+              testID={`flight-${f.id}`}
+              onPress={() => setModal(f)}
+              style={[s.card, focused && s.cardFocused]}
+            >
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                  <Icon name="airplane" size={18} color={colors.brandPrimary} />
+                  <Text style={s.flightNum}>{f.airline || "Flight"} {f.flight_number}</Text>
+                </View>
+                <StatusBadge status={f.booking_status} />
               </View>
-              <StatusBadge status={f.booking_status} />
-            </View>
-            <View style={s.routeRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={s.city}>{f.departure_location || "—"}</Text>
-                <Text style={s.time}>{niceDate(f.departure_datetime)}</Text>
-                <Text style={s.time}>{niceTime(f.departure_datetime)}</Text>
+              <View style={s.routeRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.city} numberOfLines={1}>{f.departure_location || "—"}</Text>
+                  <Text style={s.time}>{niceDate(f.departure_datetime)}</Text>
+                  <Text style={s.time}>{niceTime(f.departure_datetime)}</Text>
+                </View>
+                <Icon name="arrow-right" size={18} color={colors.muted} />
+                <View style={{ flex: 1, alignItems: "flex-end" }}>
+                  <Text style={s.city} numberOfLines={1}>{f.arrival_location || "—"}</Text>
+                  <Text style={s.time}>{niceDate(f.arrival_datetime)}</Text>
+                  <Text style={s.time}>{niceTime(f.arrival_datetime)}</Text>
+                </View>
               </View>
-              <Icon name="arrow-right" size={18} color={colors.muted} />
-              <View style={{ flex: 1, alignItems: "flex-end" }}>
-                <Text style={s.city}>{f.arrival_location || "—"}</Text>
-                <Text style={s.time}>{niceDate(f.arrival_datetime)}</Text>
-                <Text style={s.time}>{niceTime(f.arrival_datetime)}</Text>
+              {f.layovers.length > 0 && (
+                <Text style={s.layoverText}>
+                  {f.layovers.length} layover{f.layovers.length > 1 ? "s" : ""}: {f.layovers.map((l) => l.location).join(", ")}
+                </Text>
+              )}
+              <View style={s.footRow}>
+                {f.cost > 0 && <Text style={s.cost}>${f.cost.toFixed(2)}</Text>}
+                {ticket ? (
+                  <Pressable
+                    onPress={(e) => { e.stopPropagation?.(); nav.goToTicket(ticket.id); }}
+                    style={s.linkChip}
+                    testID={`view-ticket-${f.id}`}
+                  >
+                    <Icon name="ticket-outline" size={14} color={colors.brandPrimary} />
+                    <Text style={s.linkChipTxt}>View ticket</Text>
+                  </Pressable>
+                ) : null}
               </View>
-            </View>
-            {f.layovers.length > 0 && (
-              <Text style={s.layoverText}>
-                {f.layovers.length} layover{f.layovers.length > 1 ? "s" : ""}: {f.layovers.map((l) => l.location).join(", ")}
-              </Text>
-            )}
-            {f.cost > 0 && <Text style={s.cost}>${f.cost.toFixed(2)}</Text>}
-          </Pressable>
-        ))}
+            </Pressable>
+          );
+        })}
       </ListWrapper>
 
       <FormModal
@@ -122,11 +144,7 @@ export default function FlightsTab({ trip }: { trip: Trip }) {
       >
         {modal && (
           <>
-            <Pressable
-              testID="ai-parse-btn"
-              onPress={() => setShowAI(true)}
-              style={s.aiBtn}
-            >
+            <Pressable testID="ai-parse-btn" onPress={() => setShowAI(true)} style={s.aiBtn}>
               <Icon name="auto-fix" size={18} color={colors.brandPrimary} />
               <Text style={s.aiTxt}>Auto-fill from booking confirmation</Text>
             </Pressable>
@@ -134,34 +152,13 @@ export default function FlightsTab({ trip }: { trip: Trip }) {
             {showAI && (
               <View style={s.aiBox}>
                 <Text style={s.aiLabel}>Paste your flight booking confirmation:</Text>
-                <Input
-                  testID="ai-input"
-                  value={aiText}
-                  onChangeText={setAiText}
-                  multiline
-                  placeholder="Paste confirmation email text..."
-                />
+                <Input testID="ai-input" value={aiText} onChangeText={setAiText} multiline placeholder="Paste confirmation email text..." />
                 <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
-                  <Pressable
-                    onPress={() => {
-                      setShowAI(false);
-                      setAiText("");
-                    }}
-                    style={[s.aiActionBtn, { backgroundColor: colors.surfaceTertiary }]}
-                  >
+                  <Pressable onPress={() => { setShowAI(false); setAiText(""); }} style={[s.aiActionBtn, { backgroundColor: colors.surfaceTertiary }]}>
                     <Text style={{ color: colors.onSurface }}>Cancel</Text>
                   </Pressable>
-                  <Pressable
-                    testID="ai-extract-btn"
-                    onPress={() => parseAI.mutate(aiText)}
-                    disabled={!aiText.trim() || parseAI.isPending}
-                    style={[s.aiActionBtn, { backgroundColor: colors.brandPrimary }]}
-                  >
-                    {parseAI.isPending ? (
-                      <ActivityIndicator color="#fff" size="small" />
-                    ) : (
-                      <Text style={{ color: colors.onBrandPrimary, fontWeight: "600" }}>Extract</Text>
-                    )}
+                  <Pressable testID="ai-extract-btn" onPress={() => parseAI.mutate(aiText)} disabled={!aiText.trim() || parseAI.isPending} style={[s.aiActionBtn, { backgroundColor: colors.brandPrimary }]}>
+                    {parseAI.isPending ? <ActivityIndicator color="#fff" size="small" /> : <Text style={{ color: colors.onBrandPrimary, fontWeight: "600" }}>Extract</Text>}
                   </Pressable>
                 </View>
               </View>
@@ -174,13 +171,21 @@ export default function FlightsTab({ trip }: { trip: Trip }) {
               <Input value={modal.flight_number} onChangeText={(v) => setModal({ ...modal, flight_number: v })} placeholder="DL 456" testID="input-flight-number" />
             </Field>
             <Field label="Departure location">
-              <Input value={modal.departure_location} onChangeText={(v) => setModal({ ...modal, departure_location: v })} placeholder="JFK, New York" />
+              <LocationInput
+                value={{ location: modal.departure_location, latitude: modal.departure_latitude, longitude: modal.departure_longitude }}
+                onChange={(v) => setModal({ ...modal, departure_location: v.location, departure_latitude: v.latitude ?? null, departure_longitude: v.longitude ?? null })}
+                placeholder="JFK, New York"
+              />
             </Field>
             <Field label="Departure date & time">
               <DateTimeInput value={modal.departure_datetime} onChange={(v) => setModal({ ...modal, departure_datetime: v })} />
             </Field>
             <Field label="Arrival location">
-              <Input value={modal.arrival_location} onChangeText={(v) => setModal({ ...modal, arrival_location: v })} placeholder="CDG, Paris" />
+              <LocationInput
+                value={{ location: modal.arrival_location, latitude: modal.arrival_latitude, longitude: modal.arrival_longitude }}
+                onChange={(v) => setModal({ ...modal, arrival_location: v.location, arrival_latitude: v.latitude ?? null, arrival_longitude: v.longitude ?? null })}
+                placeholder="CDG, Paris"
+              />
             </Field>
             <Field label="Arrival date & time">
               <DateTimeInput value={modal.arrival_datetime} onChange={(v) => setModal({ ...modal, arrival_datetime: v })} />
@@ -195,14 +200,14 @@ export default function FlightsTab({ trip }: { trip: Trip }) {
                       <Icon name="close" size={18} color={colors.muted} />
                     </Pressable>
                   </View>
-                  <Input
-                    value={l.location}
-                    onChangeText={(v) => {
+                  <LocationInput
+                    value={{ location: l.location, latitude: l.latitude ?? null, longitude: l.longitude ?? null }}
+                    onChange={(v) => {
                       const next = [...modal.layovers];
-                      next[i] = { ...l, location: v };
+                      next[i] = { ...l, location: v.location, latitude: v.latitude ?? null, longitude: v.longitude ?? null };
                       setModal({ ...modal, layovers: next });
                     }}
-                    placeholder="City / Airport"
+                    placeholder="Layover city"
                   />
                   <View style={{ height: 8 }} />
                   <DateTimeInput
@@ -231,7 +236,7 @@ export default function FlightsTab({ trip }: { trip: Trip }) {
                 onPress={() =>
                   setModal({
                     ...modal,
-                    layovers: [...modal.layovers, { location: "", arrival_datetime: "", departure_datetime: "" }],
+                    layovers: [...modal.layovers, { location: "", arrival_datetime: "", departure_datetime: "", latitude: null, longitude: null }],
                   })
                 }
                 style={s.addLayoverBtn}
@@ -263,50 +268,34 @@ const s = StyleSheet.create({
     borderColor: colors.border,
     gap: spacing.md,
   },
+  cardFocused: { borderColor: colors.brandPrimary, borderWidth: 2 },
   flightNum: { fontSize: 16, fontWeight: "600", color: colors.onSurface },
   routeRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
-  city: { fontSize: 18, fontWeight: "700", color: colors.onSurface },
+  city: { fontSize: 16, fontWeight: "700", color: colors.onSurface },
   time: { fontSize: 12, color: colors.muted, marginTop: 2 },
   layoverText: { fontSize: 12, color: colors.muted },
+  footRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.md },
   cost: { fontSize: 14, fontWeight: "600", color: colors.brandPrimary },
+  linkChip: {
+    flexDirection: "row", alignItems: "center", gap: 4,
+    paddingHorizontal: spacing.md, paddingVertical: 6,
+    borderRadius: radius.pill, backgroundColor: colors.brandTertiary,
+  },
+  linkChipTxt: { color: colors.onBrandTertiary, fontSize: 12, fontWeight: "600" },
   aiBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    padding: spacing.md,
-    backgroundColor: colors.brandTertiary,
-    borderRadius: radius.md,
-    marginBottom: spacing.lg,
+    flexDirection: "row", alignItems: "center", gap: 8,
+    padding: spacing.md, backgroundColor: colors.brandTertiary,
+    borderRadius: radius.md, marginBottom: spacing.lg,
   },
   aiTxt: { color: colors.onBrandTertiary, fontWeight: "500" },
-  aiBox: {
-    padding: spacing.md,
-    backgroundColor: colors.surfaceTertiary,
-    borderRadius: radius.md,
-    marginBottom: spacing.lg,
-  },
+  aiBox: { padding: spacing.md, backgroundColor: colors.surfaceTertiary, borderRadius: radius.md, marginBottom: spacing.lg },
   aiLabel: { color: colors.muted, marginBottom: 8, fontSize: 13 },
-  aiActionBtn: {
-    flex: 1,
-    padding: spacing.md,
-    borderRadius: radius.md,
-    alignItems: "center",
-  },
-  layoverCard: {
-    padding: spacing.md,
-    borderRadius: radius.md,
-    backgroundColor: colors.surfaceTertiary,
-    marginBottom: spacing.sm,
-  },
+  aiActionBtn: { flex: 1, padding: spacing.md, borderRadius: radius.md, alignItems: "center" },
+  layoverCard: { padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.surfaceTertiary, marginBottom: spacing.sm },
   addLayoverBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    padding: spacing.md,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.brandPrimary,
-    borderStyle: "dashed",
+    flexDirection: "row", alignItems: "center", gap: 6,
+    padding: spacing.md, borderRadius: radius.md,
+    borderWidth: 1, borderColor: colors.brandPrimary, borderStyle: "dashed",
     justifyContent: "center",
   },
 });
