@@ -1,10 +1,12 @@
 import React from "react";
-import { View, Text, StyleSheet, ScrollView, Pressable } from "react-native";
+import { View, Text, StyleSheet, ScrollView, Pressable, Alert, ActivityIndicator } from "react-native";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Icon from "@react-native-vector-icons/material-design-icons";
 
 import { colors, radius, spacing } from "@/src/theme";
+import { useAuth } from "@/src/auth";
+import { api } from "@/src/api";
 
 const FEATURES: { icon: string; title: string; body: string }[] = [
   {
@@ -77,6 +79,35 @@ const FEATURES: { icon: string; title: string; body: string }[] = [
 export default function HelpPage() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { user, isLocal, signOut } = useAuth();
+  const [deleting, setDeleting] = React.useState(false);
+
+  const confirmDelete = () => {
+    if (deleting) return;
+    Alert.alert(
+      "Delete your account?",
+      "This permanently removes your account, every trip you own, and all your saved data. Trips shared with you by other people will remain untouched. This cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete forever",
+          style: "destructive",
+          onPress: async () => {
+            setDeleting(true);
+            try {
+              await api.deleteAccount();
+              await signOut();
+              router.replace("/login");
+            } catch (e: any) {
+              Alert.alert("Could not delete account", e?.message || "Please try again in a moment.");
+            } finally {
+              setDeleting(false);
+            }
+          },
+        },
+      ],
+    );
+  };
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.surface }}>
@@ -107,6 +138,25 @@ export default function HelpPage() {
             </View>
           </View>
         ))}
+
+        {user && !isLocal ? (
+          <>
+            <Text style={s.sectionLabel}>Account</Text>
+            <Pressable style={s.dangerBtn} onPress={confirmDelete} disabled={deleting} testID="delete-account-btn">
+              {deleting ? (
+                <ActivityIndicator color={colors.error} />
+              ) : (
+                <Icon name="trash-can-outline" size={18} color={colors.error} />
+              )}
+              <View style={{ flex: 1 }}>
+                <Text style={s.dangerTitle}>Delete my account</Text>
+                <Text style={s.dangerBody}>
+                  Permanently remove your Travel Space account and every trip you own. This can't be undone.
+                </Text>
+              </View>
+            </Pressable>
+          </>
+        ) : null}
 
         <Text style={s.footer}>Happy travels ✈</Text>
       </ScrollView>
@@ -152,5 +202,26 @@ const s = StyleSheet.create({
   },
   cardTitle: { fontSize: 15, fontWeight: "700", color: colors.onSurface, marginBottom: 4 },
   cardBody: { fontSize: 13, color: colors.muted, lineHeight: 19 },
+  sectionLabel: {
+    color: colors.muted,
+    textTransform: "uppercase",
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+    marginTop: spacing.xl,
+    marginBottom: spacing.sm,
+  },
+  dangerBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    padding: spacing.lg,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.error,
+    backgroundColor: colors.surfaceSecondary,
+  },
+  dangerTitle: { color: colors.error, fontWeight: "700", fontSize: 14, marginBottom: 2 },
+  dangerBody: { color: colors.muted, fontSize: 12, lineHeight: 17 },
   footer: { color: colors.muted, textAlign: "center", marginTop: spacing.xl, fontSize: 13 },
 });

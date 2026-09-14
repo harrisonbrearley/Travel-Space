@@ -176,6 +176,41 @@ async def auth_logout(authorization: Optional[str] = Header(None)):
     return {"ok": True}
 
 
+@api_router.delete("/auth/me")
+async def delete_account(user: dict = CurrentUser):
+    """Permanently delete the signed-in user's account and everything they own.
+
+    - Deletes every trip owned by the user (cascades to flights, transport,
+      stays, attractions, tickets, documents).
+    - Removes the user from every trip where they are a collaborator.
+    - Deletes any invites they created.
+    - Revokes every active session and finally removes the user row.
+
+    Required by App Store / Play Store review policy for apps that allow
+    account creation. The action is irreversible."""
+    uid = user["user_id"]
+
+    owned = await db.trips.find({"user_id": uid}, {"_id": 0, "id": 1}).to_list(10000)
+    for t in owned:
+        await cascade_delete_trip(t["id"])
+    await db.trips.delete_many({"user_id": uid})
+
+    # Remove the user from any trip they collaborated on.
+    await db.trips.update_many({"collaborators": uid}, {"$pull": {"collaborators": uid}})
+
+    # Clean up invites this user created.
+    try:
+        await db.trip_invites.delete_many({"created_by": uid})
+    except Exception:
+        pass
+
+    # Kill every session for this user, then remove the user row itself.
+    await db.user_sessions.delete_many({"user_id": uid})
+    await db.users.delete_one({"user_id": uid})
+
+    return {"ok": True}
+
+
 # ============= DOMAIN MODELS =============
 
 BookingStatus = Literal["booked", "not_booked", "pay_on_arrival"]
@@ -418,6 +453,18 @@ async def ensure_share_id(doc: dict) -> dict:
 @api_router.get("/")
 async def root():
     return {"message": "Travel Space API"}
+
+
+@api_router.get("/health")
+async def health():
+    """Liveness probe. Cheap, unauthenticated, always 200 when the app process is up."""
+    return {"status": "ok"}
+
+
+# Root-level /health so orchestrators that don't hit the /api prefix still see 200.
+@app.api_route("/health", methods=["GET", "HEAD"], include_in_schema=False)
+async def health_root():
+    return {"status": "ok"}
 
 
 @api_router.get("/trips", response_model=List[Trip])
