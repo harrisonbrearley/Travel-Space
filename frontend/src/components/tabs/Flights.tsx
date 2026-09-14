@@ -9,9 +9,11 @@ import { DateTimeInput, Field, Input, niceDate, niceTime } from "@/src/component
 import { StatusBadge, StatusPicker } from "@/src/components/status";
 import { FormModal, ListWrapper } from "@/src/components/tab-shell";
 import { LocationInput } from "@/src/components/LocationInput";
+import { CostInput } from "@/src/components/CostInput";
+import { formatMoney } from "@/src/currency";
 import type { TabNav } from "@/app/trip/[id]";
 
-const empty = (trip_id: string): Flight => ({
+const empty = (trip_id: string, currency: string): Flight => ({
   id: "",
   trip_id,
   flight_number: "",
@@ -28,6 +30,7 @@ const empty = (trip_id: string): Flight => ({
   booking_status: "not_booked",
   ticket_id: "",
   cost: 0,
+  cost_currency: currency,
   notes: "",
 });
 
@@ -77,7 +80,7 @@ export default function FlightsTab({ trip, nav }: { trip: Trip; nav: TabNav }) {
         isEmpty={flights.length === 0}
         emptyIcon="airplane"
         emptyText="No flights yet. Add one to build your itinerary."
-        onAdd={() => setModal(empty(trip.id))}
+        onAdd={() => setModal(empty(trip.id, trip.currency))}
         addLabel="Add flight"
         testID="add-flight-fab"
       >
@@ -117,7 +120,7 @@ export default function FlightsTab({ trip, nav }: { trip: Trip; nav: TabNav }) {
                 </Text>
               )}
               <View style={s.footRow}>
-                {f.cost > 0 && <Text style={s.cost}>${f.cost.toFixed(2)}</Text>}
+                {f.cost > 0 && <Text style={s.cost}>{formatMoney(f.cost, f.cost_currency)}</Text>}
                 {ticket ? (
                   <Pressable
                     onPress={(e) => { e.stopPropagation?.(); nav.goToTicket(ticket.id); }}
@@ -247,7 +250,11 @@ export default function FlightsTab({ trip, nav }: { trip: Trip; nav: TabNav }) {
             </Field>
 
             <Field label="Cost">
-              <Input value={String(modal.cost || "")} onChangeText={(v) => setModal({ ...modal, cost: parseFloat(v) || 0 })} keyboardType="numeric" placeholder="0" />
+              <CostInput
+                amount={modal.cost}
+                currency={modal.cost_currency || trip.currency}
+                onChange={(amount, code) => setModal({ ...modal, cost: amount, cost_currency: code })}
+              />
             </Field>
             <Field label="Booking status">
               <StatusPicker value={modal.booking_status} onChange={(v) => setModal({ ...modal, booking_status: v })} />

@@ -24,8 +24,7 @@ const TABS: { key: Trip["category"]; label: string }[] = [
   { key: "wishlist", label: "Wishlist" },
 ];
 
-const PLACEHOLDER =
-  "https://images.unsplash.com/photo-1708403120467-1715bb6840df?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA0MTJ8MHwxfHNlYXJjaHwxfHxlbXB0eSUyMGx1Z2dhZ2UlMjB3YWl0aW5nJTIwdHJhdmVsJTIwaWxsdXN0cmF0aW9ufGVufDB8fHx8MTc4OTM3MjkzN3ww&ixlib=rb-4.1.0&q=85";
+const PLACEHOLDER = require("../assets/images/travel-space-cover.png");
 
 export default function Home() {
   const insets = useSafeAreaInsets();
@@ -43,8 +42,19 @@ export default function Home() {
   return (
     <View style={[s.root, { paddingTop: insets.top }]}>
       <View style={s.header}>
-        <Text style={s.h1}>My Trips</Text>
-        <Text style={s.subtitle}>Plan, track, and remember every journey</Text>
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+          <View style={{ flex: 1 }}>
+            <Text style={s.h1}>Travel Space</Text>
+            <Text style={s.subtitle}>Travel itinerary made easy — bring all your bookings to one Travel Space.</Text>
+          </View>
+          <Pressable
+            testID="help-btn"
+            onPress={() => router.push("/help")}
+            style={s.helpBtn}
+          >
+            <Icon name="help-circle-outline" size={22} color={colors.onSurface} />
+          </Pressable>
+        </View>
       </View>
 
       <View style={s.segmentedWrap}>
@@ -130,7 +140,7 @@ function TripCard({ trip, onPress }: { trip: Trip; onPress: () => void }) {
       style={({ pressed }) => [s.card, pressed && { opacity: 0.9 }]}
     >
       <Image
-        source={{ uri: trip.cover_photo || PLACEHOLDER }}
+        source={trip.cover_photo ? { uri: trip.cover_photo } : PLACEHOLDER}
         style={s.cardImage}
         contentFit="cover"
         transition={200}
@@ -158,8 +168,14 @@ function TripCard({ trip, onPress }: { trip: Trip; onPress: () => void }) {
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.surface },
   header: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.sm },
+  helpBtn: {
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: colors.surfaceTertiary,
+    alignItems: "center", justifyContent: "center",
+    marginLeft: spacing.md,
+  },
   h1: { fontSize: 32, fontWeight: "700", color: colors.onSurface, letterSpacing: -0.5 },
-  subtitle: { fontSize: 14, color: colors.muted, marginTop: 4 },
+  subtitle: { fontSize: 14, color: colors.muted, marginTop: 4, lineHeight: 20 },
   segmentedWrap: { paddingHorizontal: spacing.lg, paddingTop: spacing.md },
   segmented: {
     flexDirection: "row",

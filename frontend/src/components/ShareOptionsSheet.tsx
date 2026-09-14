@@ -1,9 +1,11 @@
 import React from "react";
-import { View, Text, StyleSheet, Modal, Pressable, Share, Switch, ScrollView, Platform } from "react-native";
+import { View, Text, StyleSheet, Modal, Pressable, Share, Switch, ScrollView, Platform, ActivityIndicator } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Icon from "@react-native-vector-icons/material-design-icons";
 import { colors, radius, spacing } from "@/src/theme";
-import type { Trip } from "@/src/api";
+import { api, type Trip } from "@/src/api";
+import { exportTripPdf } from "@/src/exportPdf";
+import { useRates } from "@/src/currency";
 
 type Opt = { key: string; label: string; icon: string; description?: string };
 
@@ -35,6 +37,8 @@ export function ShareOptionsSheet({
 }) {
   const insets = useSafeAreaInsets();
   const [opts, setOpts] = React.useState<Record<string, boolean>>(DEFAULTS);
+  const [exporting, setExporting] = React.useState(false);
+  const rates = useRates();
 
   React.useEffect(() => {
     // Load persisted options
@@ -84,6 +88,36 @@ export function ShareOptionsSheet({
     doShare();
   };
 
+  const exportPdf = async () => {
+    setExporting(true);
+    try {
+      const full: any = await api.publicTrip(trip.share_id);
+      await exportTripPdf(
+        {
+          trip: full.trip || trip,
+          flights: full.flights || [],
+          transport: full.transport || [],
+          stays: full.stays || [],
+          attractions: full.attractions || [],
+          tickets: full.tickets || [],
+        },
+        {
+          flights: !!opts.flights,
+          transport: !!opts.transport,
+          stays: !!opts.stays,
+          attractions: !!opts.attractions,
+          tickets: !!opts.tickets,
+          cost: !!opts.cost,
+          map: !!opts.map,
+        },
+        rates.data?.rates,
+      );
+      onClose();
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <View style={{ flex: 1, backgroundColor: colors.surface }}>
@@ -123,6 +157,10 @@ export function ShareOptionsSheet({
         </ScrollView>
 
         <View style={[s.footer, { paddingBottom: insets.bottom + spacing.md }]}>
+          <Pressable onPress={exportPdf} disabled={exporting} style={[s.footerBtn, s.footerSecondary]} testID="share-pdf">
+            {exporting ? <ActivityIndicator color={colors.onSurface} size="small" /> : <Icon name="file-pdf-box" size={16} color={colors.onSurface} />}
+            <Text style={{ color: colors.onSurface, fontWeight: "600" }}>PDF</Text>
+          </Pressable>
           <Pressable onPress={copyLink} style={[s.footerBtn, s.footerSecondary]} testID="share-copy">
             <Icon name="content-copy" size={16} color={colors.onSurface} />
             <Text style={{ color: colors.onSurface, fontWeight: "600" }}>Copy link</Text>

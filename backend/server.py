@@ -62,6 +62,7 @@ class Trip(BaseModel):
     category: TripCategory = "upcoming"
     cover_photo: str = ""
     budget_planned: float = 0.0
+    currency: str = "USD"
     itinerary_filters: dict = Field(default_factory=lambda: {
         "flights": True, "transport": True, "stay": True, "attractions": True
     })
@@ -76,6 +77,7 @@ class TripCreate(BaseModel):
     category: TripCategory = "upcoming"
     cover_photo: str = ""
     budget_planned: float = 0.0
+    currency: str = "USD"
 
 
 class TripUpdate(BaseModel):
@@ -86,6 +88,7 @@ class TripUpdate(BaseModel):
     category: Optional[TripCategory] = None
     cover_photo: Optional[str] = None
     budget_planned: Optional[float] = None
+    currency: Optional[str] = None
     itinerary_filters: Optional[dict] = None
 
 
@@ -106,6 +109,7 @@ class Flight(BaseModel):
     booking_status: BookingStatus = "not_booked"
     ticket_id: str = ""
     cost: float = 0.0
+    cost_currency: str = "USD"
     notes: str = ""
 
 
@@ -124,6 +128,7 @@ class Transport(BaseModel):
     booking_status: BookingStatus = "not_booked"
     ticket_id: str = ""
     cost: float = 0.0
+    cost_currency: str = "USD"
     notes: str = ""
 
 
@@ -142,6 +147,7 @@ class Stay(BaseModel):
     booking_status: BookingStatus = "not_booked"
     ticket_id: str = ""
     cost: float = 0.0
+    cost_currency: str = "USD"
 
 
 class Attraction(BaseModel):
@@ -156,6 +162,8 @@ class Attraction(BaseModel):
     booking_status: BookingStatus = "not_booked"
     ticket_id: str = ""
     cost: float = 0.0
+    cost_currency: str = "USD"
+    notes: str = ""
 
 
 class Ticket(BaseModel):
@@ -164,6 +172,7 @@ class Ticket(BaseModel):
     link: str = ""
     photo: str = ""
     cost: float = 0.0
+    cost_currency: str = "USD"
     details: str = ""
     ticket_type: Literal["flight", "transport", "stay", "attraction", "other"] = "other"
     linked_item_id: str = ""
@@ -505,6 +514,36 @@ async def reverse_geocode(lat: float, lon: float):
     return {"display_name": data.get("display_name", ""), "latitude": lat, "longitude": lon}
 
 
+# ============= EXCHANGE RATES =============
+
+_RATES_CACHE: dict = {"ts": 0, "base": "USD", "rates": {}}
+
+
+@api_router.get("/exchange-rates")
+async def exchange_rates(base: str = "USD"):
+    """Free exchange rates from open.er-api.com; cached for 6 hours."""
+    import time
+    base = (base or "USD").upper()
+    now = time.time()
+    if _RATES_CACHE.get("base") == base and _RATES_CACHE.get("rates") and now - _RATES_CACHE["ts"] < 6 * 3600:
+        return {"base": base, "rates": _RATES_CACHE["rates"], "cached": True}
+
+    async with httpx.AsyncClient(timeout=15) as http:
+        try:
+            r = await http.get(f"https://open.er-api.com/v6/latest/{base}")
+            r.raise_for_status()
+            data = r.json()
+            rates = data.get("rates") or {}
+        except Exception as e:
+            logger.error(f"exchange rates error: {e}")
+            rates = {}
+    if rates:
+        _RATES_CACHE["ts"] = now
+        _RATES_CACHE["base"] = base
+        _RATES_CACHE["rates"] = rates
+    return {"base": base, "rates": rates, "cached": False}
+
+
 # ============= AI FLIGHT PARSE (text-only, legacy) =============
 
 class ParseFlightRequest(BaseModel):
@@ -601,7 +640,7 @@ Return ONLY a strict JSON object with this shape:
 {
   "category": "flight" | "transport" | "stay" | "attraction" | "unknown",
   "data": { ... category-specific fields ... },
-  "ticket": { "cost": number, "details": string, "link": string, "confirmation": string },
+  "ticket": { "cost": number, "cost_currency": string (ISO 4217 3-letter code), "details": string, "link": string, "confirmation": string },
   "confidence": number between 0 and 1
 }
 
@@ -619,12 +658,13 @@ stay:
   accommodation_name, location, checkin_datetime, checkout_datetime, booking_link, breakfast_included (bool), dinner_included (bool)
 
 attraction:
-  name, location, activity_datetime, website_link
+  name, location, activity_datetime, website_link, notes
 
 Rules:
 - Use ISO 8601 for all dates/times, e.g. 2026-06-01T09:30.
 - If the source shows only a date, use T00:00 for time.
-- Cost should be a number in the currency shown (do not convert).
+- Detect the currency carefully. Return `cost_currency` as an ISO 4217 code (USD, EUR, GBP, JPY, NOK, SEK, DKK, AUD, CAD, INR, CNY, KRW, THB, SGD, HKD, NZD, MXN, BRL, ZAR, CHF, etc.). Look for symbols ($, €, £, ¥, kr, ₹, ₩, ฿, R$, R, Fr) and words (dollars, euros, pounds, yen, kroner, krone, rupees, won). If unclear, use "USD".
+- Cost should be a number in the shown currency (no conversion).
 - No code fences, no commentary. JSON only.
 """
 

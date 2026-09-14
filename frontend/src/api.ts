@@ -42,6 +42,9 @@ export const api = {
 
   // Public
   publicTrip: (shareId: string) => req(`/public/trips/${shareId}`),
+
+  // Exchange rates
+  exchangeRates: (base = "USD") => req(`/exchange-rates?base=${base}`),
 };
 
 export type Trip = {
@@ -54,6 +57,7 @@ export type Trip = {
   category: "upcoming" | "past" | "wishlist";
   cover_photo: string;
   budget_planned: number;
+  currency: string;
   itinerary_filters: Record<string, boolean>;
   created_at: string;
 };
@@ -77,6 +81,7 @@ export type Flight = {
   booking_status: BookingStatus;
   ticket_id: string;
   cost: number;
+  cost_currency: string;
   notes: string;
 };
 
@@ -95,6 +100,7 @@ export type Transport = {
   booking_status: BookingStatus;
   ticket_id: string;
   cost: number;
+  cost_currency: string;
   notes: string;
 };
 
@@ -113,6 +119,7 @@ export type Stay = {
   booking_status: BookingStatus;
   ticket_id: string;
   cost: number;
+  cost_currency: string;
 };
 
 export type Attraction = {
@@ -127,6 +134,8 @@ export type Attraction = {
   booking_status: BookingStatus;
   ticket_id: string;
   cost: number;
+  cost_currency: string;
+  notes: string;
 };
 
 export type Ticket = {
@@ -135,6 +144,7 @@ export type Ticket = {
   link: string;
   photo: string;
   cost: number;
+  cost_currency: string;
   details: string;
   ticket_type: "flight" | "transport" | "stay" | "attraction" | "other";
   linked_item_id: string;

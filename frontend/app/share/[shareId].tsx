@@ -20,8 +20,7 @@ type PublicData = {
   attractions: any[];
 };
 
-const PLACEHOLDER =
-  "https://images.unsplash.com/photo-1624253321171-1be53e12f5f4?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxOTB8MHwxfHNlYXJjaHwxfHxLeW90byUyMEphcGFuJTIwdGVtcGxlJTIwdHJhdmVsJTIwcGhvdG9ncmFwaHl8ZW58MHx8fHwxNzg5MzcyOTMyfDA&ixlib=rb-4.1.0&q=85";
+const PLACEHOLDER = require("../../assets/images/travel-space-cover.png");
 
 function isOn(v: string | string[] | undefined, def = true): boolean {
   if (v === undefined) return def;
@@ -126,7 +125,7 @@ if(pts.length===0){m.setView([20,0],2);} else{
   return (
     <ScrollView style={{ flex: 1, backgroundColor: colors.surface }} contentContainerStyle={{ paddingBottom: insets.bottom + spacing.xl }}>
       <View style={s.hero}>
-        <Image source={{ uri: trip.cover_photo || PLACEHOLDER }} style={StyleSheet.absoluteFill} contentFit="cover" />
+        <Image source={trip.cover_photo ? { uri: trip.cover_photo } : PLACEHOLDER} style={StyleSheet.absoluteFill} contentFit="cover" />
         <LinearGradient colors={["rgba(0,0,0,0.3)", "transparent", "rgba(0,0,0,0.85)"]} locations={[0, 0.4, 1]} style={StyleSheet.absoluteFillObject} />
         <View style={[s.heroContent, { paddingTop: insets.top + spacing.xl }]}>
           <Text style={s.shareBadge}>SHARED ITINERARY</Text>

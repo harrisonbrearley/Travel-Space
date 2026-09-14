@@ -9,14 +9,16 @@ import { DateTimeInput, Field, Input, niceDate } from "@/src/components/form";
 import { StatusBadge, StatusPicker } from "@/src/components/status";
 import { FormModal, ListWrapper } from "@/src/components/tab-shell";
 import { LocationInput } from "@/src/components/LocationInput";
+import { CostInput } from "@/src/components/CostInput";
+import { formatMoney } from "@/src/currency";
 import type { TabNav } from "@/app/trip/[id]";
 
-const empty = (trip_id: string): Stay => ({
+const empty = (trip_id: string, currency: string): Stay => ({
   id: "", trip_id,
   accommodation_name: "", location: "", latitude: null, longitude: null,
   checkin_datetime: "", checkout_datetime: "", booking_link: "",
   breakfast_included: false, dinner_included: false,
-  booking_status: "not_booked", ticket_id: "", cost: 0,
+  booking_status: "not_booked", ticket_id: "", cost: 0, cost_currency: currency,
 });
 
 export default function StaysTab({ trip, nav }: { trip: Trip; nav: TabNav }) {
@@ -41,7 +43,7 @@ export default function StaysTab({ trip, nav }: { trip: Trip; nav: TabNav }) {
         isEmpty={data.length === 0}
         emptyIcon="bed-outline"
         emptyText="No accommodation added yet."
-        onAdd={() => setModal(empty(trip.id))}
+        onAdd={() => setModal(empty(trip.id, trip.currency))}
         addLabel="Add stay"
         testID="add-stay-fab"
       >
@@ -73,7 +75,7 @@ export default function StaysTab({ trip, nav }: { trip: Trip; nav: TabNav }) {
                 {t.dinner_included && <View style={s.mealTag}><Text style={s.mealTxt}>Dinner</Text></View>}
               </View>
               <View style={s.footRow}>
-                {t.cost > 0 && <Text style={s.cost}>${t.cost.toFixed(2)}</Text>}
+                {t.cost > 0 && <Text style={s.cost}>{formatMoney(t.cost, t.cost_currency)}</Text>}
                 {ticket ? (
                   <Pressable onPress={(e) => { e.stopPropagation?.(); nav.goToTicket(ticket.id); }} style={s.linkChip} testID={`view-ticket-${t.id}`}>
                     <Icon name="ticket-outline" size={14} color={colors.brandPrimary} />
@@ -124,7 +126,11 @@ export default function StaysTab({ trip, nav }: { trip: Trip; nav: TabNav }) {
               <Switch value={modal.dinner_included} onValueChange={(v) => setModal({ ...modal, dinner_included: v })} />
             </View>
             <Field label="Cost">
-              <Input value={String(modal.cost || "")} onChangeText={(v) => setModal({ ...modal, cost: parseFloat(v) || 0 })} keyboardType="numeric" placeholder="0" />
+              <CostInput
+                amount={modal.cost}
+                currency={modal.cost_currency || trip.currency}
+                onChange={(amount, code) => setModal({ ...modal, cost: amount, cost_currency: code })}
+              />
             </Field>
             <Field label="Booking status">
               <StatusPicker value={modal.booking_status} onChange={(v) => setModal({ ...modal, booking_status: v })} />

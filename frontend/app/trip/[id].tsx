@@ -41,8 +41,7 @@ const TABS = [
 
 type TabKey = (typeof TABS)[number]["key"];
 
-const PLACEHOLDER =
-  "https://images.unsplash.com/photo-1624253321171-1be53e12f5f4?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxOTB8MHwxfHNlYXJjaHwxfHxLeW90byUyMEphcGFuJTIwdGVtcGxlJTIwdHJhdmVsJTIwcGhvdG9ncmFwaHl8ZW58MHx8fHwxNzg5MzcyOTMyfDA&ixlib=rb-4.1.0&q=85";
+const PLACEHOLDER = require("../../assets/images/travel-space-cover.png");
 
 export type TabNav = {
   goToTicket: (ticketId: string) => void;
@@ -105,7 +104,7 @@ export default function TripDetailScreen() {
     <View style={s.root}>
       <View style={s.cover}>
         <Image
-          source={{ uri: trip.cover_photo || PLACEHOLDER }}
+          source={trip.cover_photo ? { uri: trip.cover_photo } : PLACEHOLDER}
           style={StyleSheet.absoluteFill}
           contentFit="cover"
         />

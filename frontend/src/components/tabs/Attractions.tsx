@@ -9,12 +9,14 @@ import { DateTimeInput, Field, Input, niceDate, niceTime } from "@/src/component
 import { StatusBadge, StatusPicker } from "@/src/components/status";
 import { FormModal, ListWrapper } from "@/src/components/tab-shell";
 import { LocationInput } from "@/src/components/LocationInput";
+import { CostInput } from "@/src/components/CostInput";
+import { formatMoney } from "@/src/currency";
 import type { TabNav } from "@/app/trip/[id]";
 
-const empty = (trip_id: string): Attraction => ({
+const empty = (trip_id: string, currency: string): Attraction => ({
   id: "", trip_id, name: "", website_link: "",
   activity_datetime: "", location: "", latitude: null, longitude: null,
-  booking_status: "not_booked", ticket_id: "", cost: 0,
+  booking_status: "not_booked", ticket_id: "", cost: 0, cost_currency: currency, notes: "",
 });
 
 export default function AttractionsTab({ trip, nav }: { trip: Trip; nav: TabNav }) {
@@ -39,7 +41,7 @@ export default function AttractionsTab({ trip, nav }: { trip: Trip; nav: TabNav 
         isEmpty={data.length === 0}
         emptyIcon="map-marker-outline"
         emptyText="No attractions added yet."
-        onAdd={() => setModal(empty(trip.id))}
+        onAdd={() => setModal(empty(trip.id, trip.currency))}
         addLabel="Add attraction"
         testID="add-attraction-fab"
       >
@@ -59,6 +61,7 @@ export default function AttractionsTab({ trip, nav }: { trip: Trip; nav: TabNav 
               {!!t.activity_datetime && (
                 <Text style={s.time}>{niceDate(t.activity_datetime)} · {niceTime(t.activity_datetime)}</Text>
               )}
+              {!!t.notes && <Text style={s.notes} numberOfLines={2}>{t.notes}</Text>}
               {!!t.website_link && (
                 <Pressable onPress={() => Linking.openURL(t.website_link)} style={s.linkRow}>
                   <Icon name="open-in-new" size={14} color={colors.brandPrimary} />
@@ -66,7 +69,7 @@ export default function AttractionsTab({ trip, nav }: { trip: Trip; nav: TabNav 
                 </Pressable>
               )}
               <View style={s.footRow}>
-                {t.cost > 0 && <Text style={s.cost}>${t.cost.toFixed(2)}</Text>}
+                {t.cost > 0 && <Text style={s.cost}>{formatMoney(t.cost, t.cost_currency)}</Text>}
                 {ticket ? (
                   <Pressable onPress={(e) => { e.stopPropagation?.(); nav.goToTicket(ticket.id); }} style={s.linkChip} testID={`view-ticket-${t.id}`}>
                     <Icon name="ticket-outline" size={14} color={colors.brandPrimary} />
@@ -106,10 +109,23 @@ export default function AttractionsTab({ trip, nav }: { trip: Trip; nav: TabNav 
               <Input value={modal.website_link} onChangeText={(v) => setModal({ ...modal, website_link: v })} placeholder="https://..." keyboardType="url" autoCapitalize="none" />
             </Field>
             <Field label="Cost">
-              <Input value={String(modal.cost || "")} onChangeText={(v) => setModal({ ...modal, cost: parseFloat(v) || 0 })} keyboardType="numeric" placeholder="0" />
+              <CostInput
+                amount={modal.cost}
+                currency={modal.cost_currency || trip.currency}
+                onChange={(amount, code) => setModal({ ...modal, cost: amount, cost_currency: code })}
+              />
             </Field>
             <Field label="Booking status">
               <StatusPicker value={modal.booking_status} onChange={(v) => setModal({ ...modal, booking_status: v })} />
+            </Field>
+            <Field label="Notes / details">
+              <Input
+                testID="input-attraction-notes"
+                value={modal.notes}
+                onChangeText={(v) => setModal({ ...modal, notes: v })}
+                multiline
+                placeholder="Anything you want to remember — tips, dress code, meeting point, tour operator, etc."
+              />
             </Field>
           </>
         )}
@@ -124,6 +140,7 @@ const s = StyleSheet.create({
   name: { fontSize: 16, fontWeight: "600", color: colors.onSurface, flex: 1 },
   loc: { fontSize: 13, color: colors.muted },
   time: { fontSize: 13, color: colors.onSurface, fontWeight: "500" },
+  notes: { fontSize: 13, color: colors.muted, fontStyle: "italic" },
   linkRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   linkTxt: { color: colors.brandPrimary, fontSize: 12, flex: 1 },
   footRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.md, marginTop: 4 },

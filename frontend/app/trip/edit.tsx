@@ -19,6 +19,7 @@ import Icon from "@react-native-vector-icons/material-design-icons";
 import { api, type Trip } from "@/src/api";
 import { colors, radius, spacing } from "@/src/theme";
 import { DateTimeInput, Field, Input } from "@/src/components/form";
+import { CurrencyPickerButton } from "@/src/components/CostInput";
 
 const CATS: { key: Trip["category"]; label: string }[] = [
   { key: "upcoming", label: "Upcoming" },
@@ -46,6 +47,7 @@ export default function EditTripScreen() {
   const [end, setEnd] = React.useState("");
   const [budget, setBudget] = React.useState("");
   const [photo, setPhoto] = React.useState("");
+  const [currency, setCurrency] = React.useState("USD");
 
   React.useEffect(() => {
     if (existing) {
@@ -56,6 +58,7 @@ export default function EditTripScreen() {
       setEnd(existing.end_date);
       setBudget(String(existing.budget_planned || ""));
       setPhoto(existing.cover_photo);
+      setCurrency(existing.currency || "USD");
     }
   }, [existing]);
 
@@ -68,6 +71,7 @@ export default function EditTripScreen() {
         start_date: start,
         end_date: end,
         budget_planned: parseFloat(budget) || 0,
+        currency: currency || "USD",
         cover_photo: photo,
       };
       if (isNew) return api.createTrip(payload);
@@ -188,13 +192,21 @@ export default function EditTripScreen() {
           </View>
         </View>
 
-        <Field label="Planned budget ($)">
+        <Field label="Planned budget">
           <Input
             testID="input-budget"
             value={budget}
             onChangeText={setBudget}
             keyboardType="numeric"
             placeholder="0"
+          />
+        </Field>
+
+        <Field label="Trip currency">
+          <CurrencyPickerButton
+            testID="input-currency"
+            value={currency}
+            onChange={setCurrency}
           />
         </Field>
 

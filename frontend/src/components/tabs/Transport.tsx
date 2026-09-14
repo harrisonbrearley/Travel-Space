@@ -9,6 +9,8 @@ import { DateTimeInput, Field, Input, niceDate, niceTime } from "@/src/component
 import { StatusBadge, StatusPicker } from "@/src/components/status";
 import { FormModal, ListWrapper } from "@/src/components/tab-shell";
 import { LocationInput } from "@/src/components/LocationInput";
+import { CostInput } from "@/src/components/CostInput";
+import { formatMoney } from "@/src/currency";
 import type { TabNav } from "@/app/trip/[id]";
 
 const TYPES: { key: Transport["transport_type"]; label: string; icon: string }[] = [
@@ -19,7 +21,7 @@ const TYPES: { key: Transport["transport_type"]; label: string; icon: string }[]
   { key: "other", label: "Other", icon: "dots-horizontal" },
 ];
 
-const empty = (trip_id: string): Transport => ({
+const empty = (trip_id: string, currency: string): Transport => ({
   id: "",
   trip_id,
   transport_type: "car",
@@ -34,6 +36,7 @@ const empty = (trip_id: string): Transport => ({
   booking_status: "not_booked",
   ticket_id: "",
   cost: 0,
+  cost_currency: currency,
   notes: "",
 });
 
@@ -67,7 +70,7 @@ export default function TransportTab({ trip, nav }: { trip: Trip; nav: TabNav })
         isEmpty={data.length === 0}
         emptyIcon="car"
         emptyText="No transport added yet."
-        onAdd={() => setModal(empty(trip.id))}
+        onAdd={() => setModal(empty(trip.id, trip.currency))}
         addLabel="Add transport"
         testID="add-transport-fab"
       >
@@ -95,7 +98,7 @@ export default function TransportTab({ trip, nav }: { trip: Trip; nav: TabNav })
                 </View>
               </View>
               <View style={s.footRow}>
-                {t.cost > 0 && <Text style={s.cost}>${t.cost.toFixed(2)}</Text>}
+                {t.cost > 0 && <Text style={s.cost}>{formatMoney(t.cost, t.cost_currency)}</Text>}
                 {ticket ? (
                   <Pressable onPress={(e) => { e.stopPropagation?.(); nav.goToTicket(ticket.id); }} style={s.linkChip} testID={`view-ticket-${t.id}`}>
                     <Icon name="ticket-outline" size={14} color={colors.brandPrimary} />
@@ -152,7 +155,11 @@ export default function TransportTab({ trip, nav }: { trip: Trip; nav: TabNav })
               <DateTimeInput value={modal.arrival_datetime} onChange={(v) => setModal({ ...modal, arrival_datetime: v })} />
             </Field>
             <Field label="Cost">
-              <Input value={String(modal.cost || "")} onChangeText={(v) => setModal({ ...modal, cost: parseFloat(v) || 0 })} keyboardType="numeric" placeholder="0" />
+              <CostInput
+                amount={modal.cost}
+                currency={modal.cost_currency || trip.currency}
+                onChange={(amount, code) => setModal({ ...modal, cost: amount, cost_currency: code })}
+              />
             </Field>
             <Field label="Booking status">
               <StatusPicker value={modal.booking_status} onChange={(v) => setModal({ ...modal, booking_status: v })} />

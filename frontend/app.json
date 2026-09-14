@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "frontend",
+    "name": "Travel Space",
     "slug": "frontend",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -20,7 +20,9 @@
         "backgroundColor": "#F9F8F6"
       },
       "package": "com.emergent.exploreitinerary.woghrg",
-      "permissions": ["READ_MEDIA_IMAGES"]
+      "permissions": [
+        "READ_MEDIA_IMAGES"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -43,7 +45,13 @@
       "expo-secure-store",
       "expo-web-browser",
       "expo-status-bar",
-      ["expo-image-picker", { "photosPermission": "Add photos to your trips and tickets." }]
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Add photos to your trips and tickets."
+        }
+      ],
+      "expo-sharing"
     ],
     "experiments": {
       "typedRoutes": true

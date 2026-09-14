@@ -9,6 +9,8 @@ import { api, type Attraction, type Flight, type Stay, type Ticket, type Transpo
 import { colors, radius, spacing } from "@/src/theme";
 import { Field, Input } from "@/src/components/form";
 import { FormModal, ListWrapper } from "@/src/components/tab-shell";
+import { CostInput } from "@/src/components/CostInput";
+import { formatMoney } from "@/src/currency";
 import type { TabNav } from "@/app/trip/[id]";
 
 const TYPES: { key: Ticket["ticket_type"]; label: string; icon: string }[] = [
@@ -19,8 +21,8 @@ const TYPES: { key: Ticket["ticket_type"]; label: string; icon: string }[] = [
   { key: "other", label: "Other", icon: "ticket-outline" },
 ];
 
-const empty = (trip_id: string): Ticket => ({
-  id: "", trip_id, link: "", photo: "", cost: 0, details: "",
+const empty = (trip_id: string, currency: string): Ticket => ({
+  id: "", trip_id, link: "", photo: "", cost: 0, cost_currency: currency, details: "",
   ticket_type: "other", linked_item_id: "",
 });
 
@@ -84,7 +86,7 @@ export default function TicketsTab({ trip, nav }: { trip: Trip; nav: TabNav }) {
         isEmpty={tickets.length === 0}
         emptyIcon="ticket-outline"
         emptyText="Keep all bookings in one place. Add your first ticket."
-        onAdd={() => setModal(empty(trip.id))}
+        onAdd={() => setModal(empty(trip.id, trip.currency))}
         addLabel="Add ticket"
         testID="add-ticket-fab"
       >
@@ -105,7 +107,7 @@ export default function TicketsTab({ trip, nav }: { trip: Trip; nav: TabNav }) {
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                   <Icon name={typeIcon as any} size={14} color={colors.brandPrimary} />
                   <Text style={s.typeLabel}>{t.ticket_type.toUpperCase()}</Text>
-                  {t.cost > 0 && <Text style={s.cost}> · ${t.cost.toFixed(2)}</Text>}
+                  {t.cost > 0 && <Text style={s.cost}> · {formatMoney(t.cost, t.cost_currency)}</Text>}
                 </View>
                 {!!t.details && <Text style={s.details} numberOfLines={2}>{t.details}</Text>}
                 {!!t.link && (
@@ -199,7 +201,11 @@ export default function TicketsTab({ trip, nav }: { trip: Trip; nav: TabNav }) {
               <Input value={modal.link} onChangeText={(v) => setModal({ ...modal, link: v })} keyboardType="url" autoCapitalize="none" placeholder="https://..." />
             </Field>
             <Field label="Cost">
-              <Input value={String(modal.cost || "")} onChangeText={(v) => setModal({ ...modal, cost: parseFloat(v) || 0 })} keyboardType="numeric" placeholder="0" />
+              <CostInput
+                amount={modal.cost}
+                currency={modal.cost_currency || trip.currency}
+                onChange={(amount, code) => setModal({ ...modal, cost: amount, cost_currency: code })}
+              />
             </Field>
           </>
         )}

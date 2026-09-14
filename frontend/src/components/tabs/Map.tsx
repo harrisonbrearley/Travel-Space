@@ -1,15 +1,24 @@
 import React from "react";
-import { View, Text, StyleSheet } from "react-native";
+import { View, Text, StyleSheet, ScrollView, Pressable } from "react-native";
 import { WebView } from "react-native-webview";
 import { useQuery } from "@tanstack/react-query";
 import Icon from "@react-native-vector-icons/material-design-icons";
 
 import { api, type Attraction, type Flight, type Stay, type Transport, type Trip } from "@/src/api";
-import { colors, spacing } from "@/src/theme";
+import { colors, radius, spacing } from "@/src/theme";
 
-type Point = { lat: number; lng: number; label: string; sub?: string; when?: string; category: string };
+type Cat = "flights" | "transport" | "stay" | "attractions";
 
-const buildHtml = (points: Point[], showLine: boolean) => `
+type Point = { lat: number; lng: number; label: string; sub?: string; when?: string; category: Cat };
+
+const FILTERS: { key: Cat; label: string; icon: string }[] = [
+  { key: "flights", label: "Flights", icon: "airplane" },
+  { key: "transport", label: "Transport", icon: "car" },
+  { key: "stay", label: "Stay", icon: "bed-outline" },
+  { key: "attractions", label: "Attractions", icon: "map-marker-outline" },
+];
+
+const buildHtml = (points: Point[]) => `
 <!DOCTYPE html>
 <html>
 <head>
@@ -37,7 +46,7 @@ const buildHtml = (points: Point[], showLine: boolean) => `
       const icon = L.divIcon({ className: '', html: '<div class="num-icon">' + (i + 1) + '</div>', iconSize: [28, 28], iconAnchor: [14, 14] });
       L.marker([p.lat, p.lng], { icon }).addTo(map).bindPopup('<b>' + p.label + '</b>' + (p.sub ? '<br/>' + p.sub : '') + (p.when ? '<br/><small>' + p.when + '</small>' : ''));
     });
-    ${showLine ? "if (latlngs.length > 1) { L.polyline(latlngs, { color: '#788B76', weight: 3, opacity: 0.75, dashArray: '6 8' }).addTo(map); }" : ""}
+    if (latlngs.length > 1) { L.polyline(latlngs, { color: '#788B76', weight: 3, opacity: 0.75, dashArray: '6 8' }).addTo(map); }
     if (latlngs.length === 1) map.setView(latlngs[0], 12);
     else map.fitBounds(latlngs, { padding: [40, 40] });
   }
@@ -47,6 +56,10 @@ const buildHtml = (points: Point[], showLine: boolean) => `
 `;
 
 export default function MapTab({ trip }: { trip: Trip }) {
+  const [filters, setFilters] = React.useState<Record<Cat, boolean>>({
+    flights: true, transport: true, stay: true, attractions: true,
+  });
+
   const { data: flights = [] } = useQuery<Flight[]>({ queryKey: ["flights", trip.id], queryFn: () => api.list("flights", trip.id) });
   const { data: transport = [] } = useQuery<Transport[]>({ queryKey: ["transport", trip.id], queryFn: () => api.list("transport", trip.id) });
   const { data: stays = [] } = useQuery<Stay[]>({ queryKey: ["stays", trip.id], queryFn: () => api.list("stays", trip.id) });
@@ -54,20 +67,20 @@ export default function MapTab({ trip }: { trip: Trip }) {
 
   const points: Point[] = React.useMemo(() => {
     const pts: Point[] = [];
-    flights.forEach((f) => {
+    if (filters.flights) flights.forEach((f) => {
       if (f.departure_latitude != null && f.departure_longitude != null) {
-        pts.push({ lat: f.departure_latitude, lng: f.departure_longitude, label: `Depart ${f.departure_location}`, sub: `${f.airline || ""} ${f.flight_number}`.trim(), when: f.departure_datetime, category: "flight" });
+        pts.push({ lat: f.departure_latitude, lng: f.departure_longitude, label: `Depart ${f.departure_location}`, sub: `${f.airline || ""} ${f.flight_number}`.trim(), when: f.departure_datetime, category: "flights" });
       }
       f.layovers?.forEach((l) => {
         if (l.latitude != null && l.longitude != null) {
-          pts.push({ lat: l.latitude, lng: l.longitude, label: `Layover ${l.location}`, when: l.arrival_datetime, category: "flight" });
+          pts.push({ lat: l.latitude, lng: l.longitude, label: `Layover ${l.location}`, when: l.arrival_datetime, category: "flights" });
         }
       });
       if (f.arrival_latitude != null && f.arrival_longitude != null) {
-        pts.push({ lat: f.arrival_latitude, lng: f.arrival_longitude, label: `Arrive ${f.arrival_location}`, sub: `${f.airline || ""} ${f.flight_number}`.trim(), when: f.arrival_datetime, category: "flight" });
+        pts.push({ lat: f.arrival_latitude, lng: f.arrival_longitude, label: `Arrive ${f.arrival_location}`, sub: `${f.airline || ""} ${f.flight_number}`.trim(), when: f.arrival_datetime, category: "flights" });
       }
     });
-    transport.forEach((t) => {
+    if (filters.transport) transport.forEach((t) => {
       if (t.departure_latitude != null && t.departure_longitude != null) {
         pts.push({ lat: t.departure_latitude, lng: t.departure_longitude, label: `${t.transport_type}: ${t.departure_location}`, when: t.departure_datetime, category: "transport" });
       }
@@ -75,14 +88,14 @@ export default function MapTab({ trip }: { trip: Trip }) {
         pts.push({ lat: t.arrival_latitude, lng: t.arrival_longitude, label: `${t.transport_type}: ${t.arrival_location}`, when: t.arrival_datetime, category: "transport" });
       }
     });
-    stays.forEach((s) => {
-      if (s.latitude != null && s.longitude != null) {
-        pts.push({ lat: s.latitude, lng: s.longitude, label: s.accommodation_name || "Stay", sub: s.location, when: s.checkin_datetime, category: "stay" });
+    if (filters.stay) stays.forEach((st) => {
+      if (st.latitude != null && st.longitude != null) {
+        pts.push({ lat: st.latitude, lng: st.longitude, label: st.accommodation_name || "Stay", sub: st.location, when: st.checkin_datetime, category: "stay" });
       }
     });
-    attractions.forEach((a) => {
+    if (filters.attractions) attractions.forEach((a) => {
       if (a.latitude != null && a.longitude != null) {
-        pts.push({ lat: a.latitude, lng: a.longitude, label: a.name || "Activity", sub: a.location, when: a.activity_datetime, category: "attraction" });
+        pts.push({ lat: a.latitude, lng: a.longitude, label: a.name || "Activity", sub: a.location, when: a.activity_datetime, category: "attractions" });
       }
     });
 
@@ -92,39 +105,80 @@ export default function MapTab({ trip }: { trip: Trip }) {
       return new Date(a.when).getTime() - new Date(b.when).getTime();
     });
     return pts;
-  }, [flights, transport, stays, attractions]);
+  }, [filters, flights, transport, stays, attractions]);
 
-  if (points.length === 0) {
-    return (
-      <View style={s.empty}>
-        <Icon name="map-outline" size={44} color={colors.muted} />
-        <Text style={s.emptyTitle}>Your route map will build itself</Text>
-        <Text style={s.emptySub}>
-          Add a flight, stay, transport or attraction and choose an address from suggestions (or drop a pin on the map). Items with coordinates appear here in chronological order.
-        </Text>
-      </View>
-    );
-  }
+  const toggle = (k: Cat) => setFilters((f) => ({ ...f, [k]: !f[k] }));
 
   return (
-    <WebView
-      originWhitelist={["*"]}
-      source={{ html: buildHtml(points, true) }}
-      style={{ flex: 1, backgroundColor: colors.surface }}
-      javaScriptEnabled
-      domStorageEnabled
-      testID="trip-map-webview"
-    />
+    <View style={{ flex: 1 }}>
+      <View style={s.filtersWrap}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ paddingHorizontal: spacing.lg, gap: spacing.sm, alignItems: "center" }}
+        >
+          {FILTERS.map((f) => {
+            const on = !!filters[f.key];
+            return (
+              <Pressable
+                key={f.key}
+                testID={`map-filter-${f.key}`}
+                onPress={() => toggle(f.key)}
+                style={[s.chip, on && s.chipActive]}
+              >
+                <Icon name={on ? "check" : (f.icon as any)} size={14} color={on ? colors.onBrandPrimary : colors.onSurface} />
+                <Text style={[s.chipTxt, on && { color: colors.onBrandPrimary }]}>{f.label}</Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </View>
+
+      {points.length === 0 ? (
+        <View style={s.empty}>
+          <Icon name="map-outline" size={44} color={colors.muted} />
+          <Text style={s.emptyTitle}>Your route map will build itself</Text>
+          <Text style={s.emptySub}>
+            Add a flight, stay, transport or attraction and choose an address from suggestions (or drop a pin on the map). Items with coordinates appear here in chronological order.
+          </Text>
+        </View>
+      ) : (
+        <WebView
+          originWhitelist={["*"]}
+          source={{ html: buildHtml(points) }}
+          style={{ flex: 1, backgroundColor: colors.surface }}
+          javaScriptEnabled
+          domStorageEnabled
+          testID="trip-map-webview"
+        />
+      )}
+    </View>
   );
 }
 
 const s = StyleSheet.create({
-  empty: {
-    flex: 1,
-    alignItems: "center",
+  filtersWrap: {
+    height: 56,
     justifyContent: "center",
-    padding: spacing.xl,
+    backgroundColor: colors.surface,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
   },
+  chip: {
+    height: 36,
+    flexShrink: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceSecondary,
+  },
+  chipActive: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
+  chipTxt: { fontSize: 13, color: colors.onSurface, fontWeight: "500" },
+  empty: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xl },
   emptyTitle: { fontSize: 17, fontWeight: "600", color: colors.onSurface, marginTop: spacing.md, textAlign: "center" },
   emptySub: { fontSize: 14, color: colors.muted, textAlign: "center", marginTop: 8 },
 });
