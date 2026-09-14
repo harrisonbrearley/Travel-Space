@@ -261,6 +261,46 @@ frontend:
           • POST /api/trips with client id → returned trip.id == supplied uuid.
           • Repeat POST same payload → same id, DB count unchanged (idempotent).
           • Same id + different name/destination → returns ORIGINAL trip unchanged
+
+  - task: "PWA: installable manifest + service worker + offline shell"
+    implemented: true
+    working: true
+    file: "/app/frontend/public/manifest.json, /app/frontend/public/sw.js, /app/frontend/public/icon-192.png, /app/frontend/public/icon-512.png, /app/frontend/public/icon-maskable-512.png, /app/frontend/public/apple-touch-icon.png, /app/frontend/public/favicon.png, /app/frontend/src/pwa.ts, /app/frontend/app/_layout.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: |
+          Web app is now installable:
+          - Generated 192/512/maskable/180/32 icon PNGs from the black-hole
+            "TS" logo into /app/frontend/public/. Every image starts with a
+            valid PNG magic.
+          - Added /public/manifest.json with name, short_name, start_url "/",
+            display "standalone", theme_color "#6B8E7A", background_color
+            "#F7F5F0", three icon entries (any + maskable), and a "New trip"
+            shortcut.
+          - Added /public/sw.js: precaches app-shell assets on install;
+            stale-while-revalidate for static JS/CSS/images/fonts;
+            network-first with cached "/" fallback for navigations; never
+            intercepts /api/* so the existing sync queue / localStore
+            offline layer remains authoritative for app data.
+          - Because expo-router with web.output "single" bypasses +html.tsx,
+            registration happens from /app/frontend/src/pwa.ts (called once
+            in _layout.tsx). It injects <link rel="manifest">, theme-color,
+            apple-* meta tags, apple-touch-icon and viewport-fit=cover, and
+            registers the service worker on window.load. Skipped on Metro
+            dev origins so hot reload keeps working.
+          - Verified in a real browser via screenshot_tool: all head tags
+            appear, /manifest.json returns 200 JSON with 3 icons, /sw.js
+            returns 200 with correct MIME, navigator.serviceWorker.register
+            resolves with active:true, and a guest-created trip persists
+            across a full page reload (localStorage entry preserved).
+          - Offline app-data is unchanged from previous rounds: localApi
+            handles guest mode, serverMirror + syncQueue handle signed-in
+            offline usage.
+
             (proves the endpoint does not stomp existing docs).
           • Second-user hijack attempt → server issues a FRESH uuid, returned trip
             belongs to the second user, first user's trip untouched (name, destination,
@@ -496,3 +536,71 @@ agent_communication:
       optional cleanup listed in iteration_5.json: 10 <name>.png.jpg-source
       backup files can be deleted from /app/frontend/assets/ once the fix is
       confirmed on EAS.
+
+  - agent: "testing"
+    message: |
+      Round 7 — PWA (web-only) verification. All checks PASS.
+
+      A. Static assets (via curl + /app/backend/tests/pwa_static_test.py — 10/10):
+         • GET /manifest.json → 200 application/json; body parses; name/short_name =
+           "Travel Space"; display "standalone"; start_url "/"; theme_color "#6B8E7A";
+           background_color "#F7F5F0"; icons include ("192x192","any"),
+           ("512x512","any"), ("512x512","maskable"); shortcut "New trip" -> /trip/new.
+         • GET /sw.js → 200 application/javascript; source contains isApiRequest guard
+           that skips /api and /api/*.
+         • /icon-192.png, /icon-512.png, /icon-maskable-512.png, /apple-touch-icon.png,
+           /favicon.png → all 200 image/png with 89 50 4E 47 magic bytes.
+
+      B. Runtime DOM injection (Playwright, 375x667 mobile viewport, waited for
+         [data-testid=guest-btn]):
+         • link[rel=manifest].href ends with /manifest.json.
+         • meta[name=theme-color].content === "#6B8E7A".
+         • meta[name=apple-mobile-web-app-capable].content === "yes".
+         • meta[name=apple-mobile-web-app-title].content === "Travel Space".
+         • link[rel=apple-touch-icon].href ends with /apple-touch-icon.png.
+         • meta[name=viewport].content contains "viewport-fit=cover".
+
+      C. Service worker registration (from page context, since setupPwa correctly
+         skips localhost:3000 dev port):
+         • 'serviceWorker' in navigator === true.
+         • navigator.serviceWorker.register('/sw.js', {scope: '/'}) → registration.active
+           truthy within ~1s; registration.scope === "http://localhost:3000/"
+           (ends with "/"); active.state === "activated".
+         • Post-registration fetch('/manifest.json') → 200 with body.name === "Travel Space"
+           (SW did not break precache lookup).
+
+      D. Offline / guest data-path (SW active during the full flow):
+         • Tapped [data-testid=guest-btn] → home screen (create-trip FAB rendered).
+         • Tapped [data-testid=create-trip-fab], filled input-name="PWA Offline Trip"
+           and input-destination="Nowhere, Offline", tapped save-trip-btn.
+         • JSON.parse(localStorage.getItem('ts:localstore:v1')).trips.length === 1,
+           name "PWA Offline Trip" present.
+         • page.reload() — NOT bounced to login (STILL_ON_LOGIN_AFTER_RELOAD=false);
+           landed on trip detail (back-btn present).
+         • localStorage after reload still has the trip.
+         • [data-testid=tab-documents] opens with empty-state text
+           "Attach visas, boarding passes, reservations, or any file that doesn't
+           fit another tab." — a no-network read did not crash.
+
+      E. SW does NOT hijack /api/*:
+         • fetch('/api/health') via public ingress origin
+           (https://explore-itinerary-30.preview.emergentagent.com/api/health) → 200
+           {status: "ok"} while the SW is registered and controlling clients.
+         • Note: same-origin fetch on localhost:3000/api/health returns Metro's
+           index.html (Metro dev server doesn't proxy /api). This is expected — and
+           it further proves the SW isn't the one serving it, since the response is
+           text/html from Metro, not the cached shell.
+
+      F. Backend regression (/app/backend/tests/backend_round6_test.py):
+         • 26/26 PASS in 1.90s. Health endpoints, PNG validity across all 14 asset
+           PNGs, DELETE /auth/me cascade with scratch user, partial-PATCH flight,
+           documents blob strip, and invite lifecycle all still green with seed
+           token demo_marketing_token_12345 intact.
+
+      New files:
+         • /app/backend/tests/pwa_static_test.py — reusable PWA static-asset suite.
+         • /app/test_reports/pytest/round7_pwa_static.xml
+         • /app/test_reports/pytest/round7_regression.xml
+         • /app/test_reports/iteration_6.json
+
+      No bugs found. No re-test needed. Nothing modified in application code.

@@ -11,10 +11,15 @@ import { ErrorBoundary } from "@/src/components/error-boundary";
 import { queryClient } from "@/src/query-client";
 import { AuthProvider, useAuth } from "@/src/auth";
 import { SyncProvider } from "@/src/syncWorker";
+import { setupPwa } from "@/src/pwa";
 import { colors } from "@/src/theme";
 
 // Prewarm icon font
 Icon.getImageSource("home", 16, "#000").catch(() => {});
+
+// Register the PWA manifest, meta tags and service worker as early as
+// possible on web. No-op on native.
+setupPwa();
 
 LogBox.ignoreAllLogs(true);
 
