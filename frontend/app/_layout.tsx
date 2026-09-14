@@ -10,6 +10,7 @@ import Icon from "@react-native-vector-icons/material-design-icons";
 import { ErrorBoundary } from "@/src/components/error-boundary";
 import { queryClient } from "@/src/query-client";
 import { AuthProvider, useAuth } from "@/src/auth";
+import { SyncProvider } from "@/src/syncWorker";
 import { colors } from "@/src/theme";
 
 // Prewarm icon font
@@ -46,6 +47,13 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+// Enables the offline sync worker only when the user is signed in.
+// Guest / local mode never queues to the server.
+function SyncGateway({ children }: { children: React.ReactNode }) {
+  const { user, isLocal } = useAuth();
+  return <SyncProvider enabled={!!user && !isLocal}>{children}</SyncProvider>;
+}
+
 export default function RootLayout() {
   return (
     <ErrorBoundary>
@@ -55,7 +63,9 @@ export default function RootLayout() {
             <StatusBar style="dark" />
             <AuthProvider>
               <AuthGate>
-                <Stack screenOptions={{ headerShown: false, animation: "slide_from_right" }} />
+                <SyncGateway>
+                  <Stack screenOptions={{ headerShown: false, animation: "slide_from_right" }} />
+                </SyncGateway>
               </AuthGate>
             </AuthProvider>
           </QueryClientProvider>

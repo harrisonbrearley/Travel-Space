@@ -1,0 +1,42 @@
+{
+  "summary": "Round 5 backend regression + new-behaviour tests for client-provided ids / idempotent create. 26/26 tests PASS (14 Round 4 regression + 12 new Round 5). Verified: (A) partial PATCH still works on all 6 sub-item collections, documents CRUD, invite collab+copy flows; (B) POST /api/trips honours client-supplied id, is idempotent on repeat POST with same payload (no duplicate row), returns ORIGINAL trip when a different name is sent with a pre-existing owned id; (C) sub-item POST idempotency on flights returns same row for same id+trip and re-generates a fresh id when the id is reused under a different trip; (D) access control: a second user cannot hijack the first user's trip id — the server allocates a fresh id, the returned trip belongs to the second user, and the first user's trip is left intact; (E) seed trip 'Tokyo & Kyoto' + seed token demo_marketing_token_12345 preserved throughout.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "GET /api/invites/{token}",
+        "issue": "Stale Round 4 assertion expected owner_email='alex@travelspace.demo'; server correctly masks it to '' per the privacy fix. Fixed the test assertion in backend_round4_test.py (business logic is correct)."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_round5_test.py",
+    "/app/backend/tests/backend_round4_test.py",
+    "/app/test_reports/pytest/round5_full_results.xml",
+    "/app/test_reports/pytest/round5_results.xml"
+  ],
+  "action_items": [
+    "None blocking. Optional (carry-over from Round 4, still open): collaborators can PATCH the trip document itself — decide if trip metadata edits should be owner-only or open to collaborators."
+  ],
+  "critical_code_review_comments": [
+    "server.py:437-456 create_trip idempotency: correctly returns the existing trip if the caller owns it, silently drops the client-supplied id otherwise. This is the right behaviour but returns 200 in both cases, so a client cannot distinguish 'created' from 'hijack-prevented'. Consider returning 201 on real create and 200 on idempotent hit, or exposing a header, if the client ever needs to know. Not blocking.",
+    "server.py:663-681 _generic_create_factory: same pattern applied to sub-items. Note: when the id collides across trips the server silently issues a new uuid; the returned model reflects that, so clients should always trust the id from the response.",
+    "server.py is 1159 lines — approaching the 700-line split threshold. Recommend splitting auth / trips / sub-items / documents / invites / AI into modules in a future iteration."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_round4_test.py (test-only assertion update for masked owner_email)",
+    "/app/backend/tests/backend_round5_test.py (new test file)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "skipped"},
+  "seed_data_creation": "No new seed data added. Seed trip 9fbdeac7-a11c-4be2-a448-9c8560a1b6ad ('Tokyo & Kyoto') + its flight remain untouched. All test-created trips/flights/second-user rows are cleaned up in fixture teardowns.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "backend_round5_test.py covers the client-id / idempotent-create surface. It expects: (a) POST /api/trips accepts optional id and is idempotent for the same owner, (b) sub-item POST re-generates id on cross-trip reuse, (c) a foreign user's id-collision produces a fresh id (no hijack). Run with `python -m pytest backend/tests/backend_round4_test.py backend/tests/backend_round5_test.py -o addopts=''` from /app to skip the xdist config from pytest.ini.",
+  "rca_of_issue": "N/A — no functional bugs found. The one Round 4 failure was a stale test assertion (test expected the pre-fix behaviour of leaking owner_email); updated to assert the current, correct, masked behaviour."
+}

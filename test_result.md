@@ -226,6 +226,72 @@ backend:
 frontend:
   - task: "Documents tab UI"
     implemented: true
+
+  - task: "Offline mutation queue + client-provided id on create"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/api.ts, /app/frontend/src/localStore.ts, /app/frontend/src/syncQueue.ts, /app/frontend/src/syncWorker.tsx, /app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: |
+          Server: TripCreate accepts optional `id`; if it collides with an existing trip
+          owned by the same user, the endpoint returns that trip (idempotent). Same
+          idempotency added to the generic sub-item create factory.
+          Client: a new `serverMirror` LocalStore instance mirrors every online GET into
+          AsyncStorage so offline reads keep working. Every online write is optimistically
+          applied to the mirror; when fetch throws a TypeError / network error, the
+          mutation is enqueued in `ts:syncqueue:v1`. A `SyncProvider` in _layout runs a
+          NetInfo-driven drain loop that replays queued ops FIFO once connectivity
+          returns, marks 4xx/409/410 as permanent failures (recorded in a "failed" log
+          the user can dismiss) and invalidates react-query on success.
+          E2E screenshot test confirmed: with /api/** blocked, creating a trip renders
+          it instantly, the queue persists to localStorage, and once the block is
+          removed the server received the create in FIFO order with the client-provided
+          id preserved.
+      - working: true
+        agent: "testing"
+        comment: |
+          Round 5 verified via /app/backend/tests/backend_round5_test.py — 12/12 PASS.
+          Also re-ran Round 4 regression: 14/14 PASS after fixing one stale assertion.
+          Total 26/26 PASS. Confirmed:
+          • POST /api/trips with client id → returned trip.id == supplied uuid.
+          • Repeat POST same payload → same id, DB count unchanged (idempotent).
+          • Same id + different name/destination → returns ORIGINAL trip unchanged
+            (proves the endpoint does not stomp existing docs).
+          • Second-user hijack attempt → server issues a FRESH uuid, returned trip
+            belongs to the second user, first user's trip untouched (name, destination,
+            user_id all intact).
+          • Sub-item POST flights: same id + same trip → returns existing row, no dup;
+            same id + DIFFERENT trip → server generates fresh id, both flights coexist.
+          • DELETE cleanup works on client-id-created trips.
+          • Seed trip 'Tokyo & Kyoto' + seed token still authenticate at the end.
+          • Round 4 regression (partial PATCH ×6, documents CRUD, invite collab + copy)
+            all still green.
+          One tiny test-file fix applied: backend_round4_test.py owner_email assertion
+          updated from 'alex@travelspace.demo' to '' — server correctly masks the email
+          on the public invite preview (privacy fix noted in Round 4 action items);
+          the old assertion was stale.
+  - task: "Import Guest Trips on sign-in"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/components/ImportGuestModal.tsx, /app/frontend/app/index.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: |
+          One-time modal after Google sign-in when localApi still has trips. Reuses the
+          new idempotent create-with-id endpoints so the migration preserves ids across
+          every collection (trips, flights, transport, stays, attractions, tickets,
+          documents). Options: Import / Keep locally / Discard. Dismissal tracked in
+          storage under ts_guest_import_dismissed.
+
     working: true
     file: "/app/frontend/src/components/tabs/Documents.tsx"
     stuck_count: 0
@@ -360,3 +426,36 @@ agent_communication:
          intended, tighten update_trip to owner_only or add finer-grained perms.
       3. Round 2 test file (backend_round2_test.py) still uses no auth — will 401 now.
          Either add Authorization headers or archive it.
+  - agent: "testing"
+    message: |
+      Round 5 complete — 26/26 tests PASS (100%: 14 Round 4 regression + 12 new).
+      Files: /app/backend/tests/backend_round5_test.py, /app/test_reports/iteration_4.json,
+      /app/test_reports/pytest/round5_full_results.xml.
+
+      New client-provided-id behaviour (all VERIFIED):
+      • POST /api/trips with {"id": <new-uuid>, "name":"T1"} → 200, returned trip.id ==
+        the uuid I sent. DB row count reflects exactly one insert.
+      • Repeat identical POST → 200, same id, DB count DOES NOT grow (idempotent).
+      • POST with same id but a different name/destination → returns the ORIGINAL trip
+        UNCHANGED (server does not stomp existing docs — this is Read-Existing-If-Owned).
+      • DELETE /api/trips/{id} still cleans up when the id was client-supplied.
+      • Sub-item POST flights: same id + same trip returns existing row (no dup); same
+        id + DIFFERENT trip → server issues a FRESH uuid, both rows coexist under
+        their respective trips with independent data.
+      • Hijack attempt: second seeded user POSTs with the first user's trip.id → server
+        assigns a fresh id, returned trip belongs to the second user, first user's
+        trip is intact (user_id, name, destination unchanged).
+      • Seed regression: GET /api/trips/9fbdeac7-a11c-4be2-a448-9c8560a1b6ad still
+        returns name "Tokyo & Kyoto"; GET /api/trips (seeded user) still contains it;
+        Bearer demo_marketing_token_12345 still authenticates via /auth/me.
+
+      Round 4 regression re-run — 14/14 PASS. Fixed one stale assertion in
+      backend_round4_test.py: owner_email is now '' (server correctly masks) instead
+      of 'alex@travelspace.demo'; the assertion was left over from before the Round-4
+      privacy action item was applied.
+
+      Non-blocking action items still open from Round 4:
+      2. update_trip PATCH is still open to collaborators (rename etc). Decide if
+         collaborators may edit trip metadata or if this should be owner_only.
+
+      No new bugs. Nothing needs re-testing.

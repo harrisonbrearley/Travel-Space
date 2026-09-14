@@ -1,4 +1,19 @@
-import { localApi } from "./localStore";
+// Central API surface for the app. Three data paths are wired together:
+//
+//   1. Signed-in ONLINE  → real HTTP fetch. Every successful response is
+//      mirrored into `serverMirror` so future offline reads work.
+//   2. Signed-in OFFLINE → transparent fallback. Reads come from
+//      `serverMirror`, writes are optimistically applied to the mirror and
+//      pushed into `syncQueue` for later replay.
+//   3. Guest / local     → the user chose "Continue without signing in".
+//      Everything goes straight to `localApi`; nothing ever talks to the
+//      server.
+//
+// The public `api` object exposes the same method names in all three modes
+// so screens don't need to care which one is active.
+
+import { localApi, serverMirror, rid } from "./localStore";
+import { syncQueue, type QueuedEntity } from "./syncQueue";
 
 const BASE = process.env.EXPO_PUBLIC_BACKEND_URL;
 
@@ -17,6 +32,26 @@ export function isLocalMode() {
   return _localMode;
 }
 
+// --- Network error detection ---
+// fetch throws TypeError on network failure; the SDK also lets callers pass
+// in a status-code error we shouldn't retry.
+function isNetworkError(e: any): boolean {
+  if (!e) return false;
+  if (e.name === "TypeError") return true;
+  const msg = (e.message || String(e)).toLowerCase();
+  return (
+    msg.includes("network") ||
+    msg.includes("failed to fetch") ||
+    msg.includes("load failed") ||
+    msg.includes("network request failed")
+  );
+}
+
+function isNotFoundOrGone(e: any): boolean {
+  const msg = e?.message || String(e || "");
+  return /^40[04]|^410|^409/.test(msg);
+}
+
 async function req<T = any>(path: string, init?: RequestInit): Promise<T> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -32,66 +67,210 @@ async function req<T = any>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
-// --- Router helpers ---
-// When in local mode, sub-calls dispatch to localApi. Auth/AI/geo/exchange stay remote-only.
+async function getWithMirror<T>(
+  path: string,
+  onSuccess?: (data: T) => Promise<void>,
+  offlineFallback?: () => Promise<T>,
+): Promise<T> {
+  try {
+    const res = await req<T>(path);
+    if (onSuccess) {
+      try { await onSuccess(res); } catch { /* mirror is best-effort */ }
+    }
+    return res;
+  } catch (e) {
+    if (isNetworkError(e) && offlineFallback) {
+      return offlineFallback();
+    }
+    throw e;
+  }
+}
+
+type Mutation<T> = {
+  path: string;
+  method: "POST" | "PATCH" | "DELETE";
+  body?: any;
+  entity: QueuedEntity;
+  entity_id: string;
+  optimistic: () => Promise<T>;
+  applyToMirror?: (result: T) => Promise<void>;
+};
+
+async function mutateWithQueue<T>(op: Mutation<T>): Promise<T> {
+  try {
+    const res = await req<T>(op.path, {
+      method: op.method,
+      body: op.body ? JSON.stringify(op.body) : undefined,
+    });
+    if (op.applyToMirror) {
+      try { await op.applyToMirror(res); } catch { /* best-effort */ }
+    } else if (res !== undefined) {
+      // default: no-op; caller passes applyToMirror when useful
+    }
+    return res;
+  } catch (e) {
+    if (!isNetworkError(e)) throw e;
+    // Offline: apply optimistically and enqueue.
+    const optimistic = await op.optimistic();
+    await syncQueue.enqueue({
+      method: op.method,
+      path: op.path,
+      body: op.body,
+      entity: op.entity,
+      entity_id: op.entity_id,
+    });
+    return optimistic;
+  }
+}
+
+// -----------------------------------------------------------------------
+// Public API
+// -----------------------------------------------------------------------
 
 export const api = {
-  // Auth (remote-only)
+  // Auth — always remote
   exchangeSession: (session_id: string) =>
     req("/auth/session", { method: "POST", body: JSON.stringify({ session_id }) }),
   me: () => req("/auth/me"),
   logout: () => req("/auth/logout", { method: "POST" }),
 
   // Trips
-  listTrips: () => (_localMode ? localApi.listTrips() : req("/trips")),
-  getTrip: (id: string) => (_localMode ? localApi.getTrip(id) : req(`/trips/${id}`)),
-  createTrip: (data: any) =>
-    _localMode
-      ? localApi.createTrip(data)
-      : req("/trips", { method: "POST", body: JSON.stringify(data) }),
-  updateTrip: (id: string, data: any) =>
-    _localMode
-      ? localApi.updateTrip(id, data)
-      : req(`/trips/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
-  deleteTrip: (id: string) =>
-    _localMode ? localApi.deleteTrip(id) : req(`/trips/${id}`, { method: "DELETE" }),
+  listTrips: () => {
+    if (_localMode) return localApi.listTrips();
+    return getWithMirror(
+      "/trips",
+      async (trips: any) => { if (Array.isArray(trips)) await serverMirror.mirrorTrips(trips); },
+      () => serverMirror.listTrips(),
+    );
+  },
+
+  getTrip: (id: string) => {
+    if (_localMode) return localApi.getTrip(id);
+    return getWithMirror(
+      `/trips/${id}`,
+      async (trip: any) => { if (trip?.id) await serverMirror.mirrorTrip(trip); },
+      () => serverMirror.getTrip(id),
+    );
+  },
+
+  createTrip: async (data: any) => {
+    if (_localMode) return localApi.createTrip(data);
+    // Ensure a client-side id so we can optimistically render & later reconcile.
+    const withId = { ...data, id: data.id || rid() };
+    return mutateWithQueue({
+      path: "/trips",
+      method: "POST",
+      body: withId,
+      entity: "trip",
+      entity_id: withId.id,
+      optimistic: () => serverMirror.createTrip(withId),
+      applyToMirror: async (t: any) => { if (t?.id) await serverMirror.mirrorTrip(t); },
+    });
+  },
+
+  updateTrip: async (id: string, data: any) => {
+    if (_localMode) return localApi.updateTrip(id, data);
+    return mutateWithQueue({
+      path: `/trips/${id}`,
+      method: "PATCH",
+      body: data,
+      entity: "trip",
+      entity_id: id,
+      optimistic: () => serverMirror.updateTrip(id, data),
+      applyToMirror: async (t: any) => { if (t?.id) await serverMirror.mirrorTrip(t); },
+    });
+  },
+
+  deleteTrip: async (id: string) => {
+    if (_localMode) return localApi.deleteTrip(id);
+    return mutateWithQueue({
+      path: `/trips/${id}`,
+      method: "DELETE",
+      entity: "trip",
+      entity_id: id,
+      optimistic: () => serverMirror.deleteTrip(id),
+    });
+  },
 
   // Sub-items
-  list: (kind: string, tripId: string) =>
-    _localMode ? localApi.list(kind, tripId) : req(`/trips/${tripId}/${kind}`),
-  create: (kind: string, tripId: string, data: any) =>
-    _localMode
-      ? localApi.create(kind, tripId, data)
-      : req(`/trips/${tripId}/${kind}`, { method: "POST", body: JSON.stringify(data) }),
-  update: (kind: string, id: string, data: any) =>
-    _localMode
-      ? localApi.update(kind, id, data)
-      : req(`/${kind}/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
-  remove: (kind: string, id: string) =>
-    _localMode ? localApi.remove(kind, id) : req(`/${kind}/${id}`, { method: "DELETE" }),
+  list: (kind: string, tripId: string) => {
+    if (_localMode) return localApi.list(kind, tripId);
+    return getWithMirror(
+      `/trips/${tripId}/${kind}`,
+      async (rows: any) => { if (Array.isArray(rows)) await serverMirror.mirrorList(kind, tripId, rows); },
+      () => serverMirror.list(kind, tripId),
+    );
+  },
 
-  // Document single-with-blob fetch (needed to open the file)
-  getDocument: (id: string) =>
-    _localMode ? localApi.getDocument(id) : req(`/documents/${id}`),
-
-  // Collaboration invites
-  createInvite: (tripId: string, mode: "collab" | "copy") =>
-    req(`/trips/${tripId}/invites`, {
+  create: async (kind: string, tripId: string, data: any) => {
+    if (_localMode) return localApi.create(kind, tripId, data);
+    const withId = { ...data, id: data.id || rid(), trip_id: tripId };
+    return mutateWithQueue({
+      path: `/trips/${tripId}/${kind}`,
       method: "POST",
-      body: JSON.stringify({ mode }),
-    }),
+      body: withId,
+      entity: kind as QueuedEntity,
+      entity_id: withId.id,
+      optimistic: () => serverMirror.create(kind, tripId, withId),
+      applyToMirror: async (row: any) => {
+        if (row?.id) {
+          // Reflect the (possibly server-normalised) row into the mirror
+          await serverMirror.update(kind, row.id, row).catch(async () => {
+            await serverMirror.create(kind, tripId, row);
+          });
+        }
+      },
+    });
+  },
+
+  update: async (kind: string, id: string, data: any) => {
+    if (_localMode) return localApi.update(kind, id, data);
+    return mutateWithQueue({
+      path: `/${kind}/${id}`,
+      method: "PATCH",
+      body: data,
+      entity: kind as QueuedEntity,
+      entity_id: id,
+      optimistic: () => serverMirror.update(kind, id, data),
+      applyToMirror: async (row: any) => { if (row?.id) await serverMirror.update(kind, id, row).catch(() => {}); },
+    });
+  },
+
+  remove: async (kind: string, id: string) => {
+    if (_localMode) return localApi.remove(kind, id);
+    return mutateWithQueue({
+      path: `/${kind}/${id}`,
+      method: "DELETE",
+      entity: kind as QueuedEntity,
+      entity_id: id,
+      optimistic: () => serverMirror.remove(kind, id),
+    });
+  },
+
+  getDocument: (id: string) => {
+    if (_localMode) return localApi.getDocument(id);
+    return getWithMirror(
+      `/documents/${id}`,
+      async (doc: any) => { if (doc?.id) await serverMirror.update("documents", id, doc).catch(() => {}); },
+      () => serverMirror.getDocument(id),
+    );
+  },
+
+  // Collaboration invites — remote only
+  createInvite: (tripId: string, mode: "collab" | "copy") =>
+    req(`/trips/${tripId}/invites`, { method: "POST", body: JSON.stringify({ mode }) }),
   getInvitePreview: (token: string) => req(`/invites/${token}`),
   acceptInvite: (token: string) => req(`/invites/${token}/accept`, { method: "POST" }),
   removeCollaborator: (tripId: string, userId: string) =>
     req(`/trips/${tripId}/collaborators/${userId}`, { method: "DELETE" }),
 
-  // AI (remote-only; graceful failure if offline)
+  // AI — remote only (require network + auth)
   parseFlight: (text: string) =>
     req("/ai/parse-flight", { method: "POST", body: JSON.stringify({ text }) }),
   parseBooking: (body: { text?: string; image_base64?: string; mime?: string }) =>
     req("/ai/parse-booking", { method: "POST", body: JSON.stringify(body) }),
 
-  // Geo (remote-only)
+  // Geo — remote only
   geocode: (q: string) => req(`/geocode?q=${encodeURIComponent(q)}`),
   reverseGeocode: (lat: number, lon: number) => req(`/reverse-geocode?lat=${lat}&lon=${lon}`),
 
@@ -100,8 +279,12 @@ export const api = {
 
   // Exchange rates
   exchangeRates: (base = "USD") => req(`/exchange-rates?base=${base}`),
+
+  // Low-level escape hatch (used by the sync worker to replay queued ops)
+  _rawReq: req,
 };
 
+// Re-export types unchanged from before
 export type Trip = {
   id: string;
   user_id: string;

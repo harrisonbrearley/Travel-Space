@@ -405,8 +405,10 @@ class TestInviteCollab:
         assert preview["mode"] == "collab"
         assert preview["trip_name"] == temp_trip["name"]
         assert preview["expired"] is False
-        # owner_email non-null (seeded user has email)
-        assert preview["owner_email"] == "alex@travelspace.demo"
+        # owner_email is masked on public preview (privacy fix per prior review)
+        assert preview["owner_email"] == "", \
+            "Public invite preview must not leak owner_email"
+        assert preview["owner_name"], "owner_name should be set on preview"
 
         other_hdr = _headers(second_user["token"])
 

@@ -18,6 +18,8 @@ import { api, type Trip } from "@/src/api";
 import { colors, radius, spacing } from "@/src/theme";
 import { niceDate } from "@/src/components/form";
 import { useAuth } from "@/src/auth";
+import { useSync } from "@/src/syncWorker";
+import { ImportGuestModal, shouldPromptImport } from "@/src/components/ImportGuestModal";
 
 const TABS: { key: Trip["category"]; label: string }[] = [
   { key: "upcoming", label: "Upcoming" },
@@ -31,11 +33,22 @@ export default function Home() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user, isLocal, signIn, signOut } = useAuth();
+  const sync = useSync();
   const [tab, setTab] = React.useState<Trip["category"]>("upcoming");
+  const [importOpen, setImportOpen] = React.useState(false);
   const { data, isLoading, refetch, isRefetching } = useQuery<Trip[]>({
     queryKey: ["trips", isLocal ? "local" : "remote"],
     queryFn: api.listTrips,
   });
+
+  // First-time import prompt for freshly signed-in users who still have guest data
+  React.useEffect(() => {
+    if (isLocal) return;
+    if (!user) return;
+    shouldPromptImport().then((yes) => {
+      if (yes) setImportOpen(true);
+    });
+  }, [user, isLocal]);
 
   const trips = React.useMemo(() => {
     return (data || []).filter((t) => t.category === tab);
@@ -92,6 +105,35 @@ export default function Home() {
             <Text style={s.guestBannerLink}>Sign in</Text>
           </Pressable>
         </View>
+      ) : !sync.online ? (
+        <View style={[s.guestBanner, { backgroundColor: colors.surfaceTertiary }]} testID="offline-banner">
+          <Icon name="cloud-off-outline" size={14} color={colors.muted} />
+          <Text style={[s.guestBannerTxt, { color: colors.muted }]}>
+            Offline · {sync.pending > 0 ? `${sync.pending} change${sync.pending === 1 ? "" : "s"} queued` : "changes will sync when you're back online"}
+          </Text>
+        </View>
+      ) : sync.syncing || sync.pending > 0 ? (
+        <View style={s.syncBanner} testID="sync-banner">
+          <Icon name="cloud-sync-outline" size={14} color={colors.onBrandTertiary} />
+          <Text style={s.guestBannerTxt}>
+            {sync.syncing ? `Syncing ${sync.pending} change${sync.pending === 1 ? "" : "s"}…` : `${sync.pending} change${sync.pending === 1 ? "" : "s"} waiting`}
+          </Text>
+          {!sync.syncing && (
+            <Pressable onPress={sync.triggerSync}>
+              <Text style={s.guestBannerLink}>Retry</Text>
+            </Pressable>
+          )}
+        </View>
+      ) : sync.failed.length > 0 ? (
+        <View style={[s.guestBanner, { backgroundColor: colors.surfaceTertiary }]} testID="failed-banner">
+          <Icon name="alert-circle-outline" size={14} color={colors.warning} />
+          <Text style={[s.guestBannerTxt, { color: colors.muted }]}>
+            {sync.failed.length} change{sync.failed.length === 1 ? "" : "s"} couldn't be applied
+          </Text>
+          <Pressable onPress={sync.dismissFailed} testID="failed-dismiss">
+            <Text style={s.guestBannerLink}>Dismiss</Text>
+          </Pressable>
+        </View>
       ) : null}
 
       <FlatList
@@ -125,6 +167,8 @@ export default function Home() {
       >
         <Icon name="plus" size={26} color={colors.onBrandPrimary} />
       </Pressable>
+
+      <ImportGuestModal visible={importOpen} onClose={() => setImportOpen(false)} />
     </View>
   );
 }
@@ -248,6 +292,17 @@ const s = StyleSheet.create({
   },
   guestBannerTxt: { flex: 1, color: colors.onBrandTertiary, fontSize: 12, fontWeight: "500" },
   guestBannerLink: { color: colors.brandPrimary, fontSize: 12, fontWeight: "700" },
+  syncBanner: {
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.md,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 8,
+    borderRadius: radius.pill,
+    backgroundColor: colors.brandTertiary,
+  },
   card: {
     height: 220,
     borderRadius: radius.lg,

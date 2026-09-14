@@ -210,6 +210,7 @@ class Trip(BaseModel):
 
 
 class TripCreate(BaseModel):
+    id: Optional[str] = None  # client-provided ids let offline writes stay consistent after sync
     name: str
     destination: str = ""
     start_date: str = ""
@@ -435,7 +436,22 @@ async def list_trips(user: dict = CurrentUser):
 
 @api_router.post("/trips", response_model=Trip)
 async def create_trip(data: TripCreate, user: dict = CurrentUser):
-    trip = Trip(**data.dict(), user_id=user["user_id"])
+    payload = data.dict()
+    # Honour a client-supplied id (offline / import cases) but never let the
+    # client stomp on an existing document.
+    supplied_id = payload.pop("id", None)
+    if supplied_id:
+        existing = await db.trips.find_one({"id": supplied_id}, {"_id": 0})
+        if existing:
+            # Already exists — return the existing trip if it belongs to the
+            # caller, otherwise treat as a fresh id.
+            if existing.get("user_id") == user["user_id"]:
+                return Trip(**await ensure_share_id(existing))
+            supplied_id = None
+    trip_kwargs = {**payload, "user_id": user["user_id"]}
+    if supplied_id:
+        trip_kwargs["id"] = supplied_id
+    trip = Trip(**trip_kwargs)
     await db.trips.insert_one(trip.dict())
     return trip
 
@@ -649,6 +665,14 @@ def _generic_create_factory(coll_name: str, Model):
         await require_trip(trip_id, user)
         data.trip_id = trip_id
         if not data.id:
+            data.id = str(uuid.uuid4())
+        # Idempotent create: if a doc with this id is already stored under this
+        # trip, return it. Prevents duplicates when an offline queue retries
+        # after a partial network success.
+        existing = await db[coll_name].find_one({"id": data.id}, {"_id": 0})
+        if existing:
+            if existing.get("trip_id") == trip_id:
+                return Model(**existing)
             data.id = str(uuid.uuid4())
         await db[coll_name].insert_one(data.dict())
         if coll_name == "tickets":
