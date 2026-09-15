@@ -7,6 +7,7 @@
     "icon": "./assets/images/icon.png",
     "scheme": "frontend",
     "userInterfaceStyle": "automatic",
+    "primaryColor": "#F9F8F6",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.emergent.exploreitinerary.woghrg",
@@ -29,7 +30,11 @@
     "web": {
       "bundler": "metro",
       "output": "single",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/favicon.png",
+      "name": "Travel Space",
+      "shortName": "Travel Space",
+      "themeColor": "#F9F8F6",
+      "backgroundColor": "#F9F8F6"
     },
     "plugins": [
       "expo-router",
