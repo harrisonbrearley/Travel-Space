@@ -213,7 +213,18 @@ export function AutoAddSheet({
       }
       if (!body.text && !body.image_base64) throw new Error("Paste text or add a screenshot / PDF first.");
 
-      const parsed = await api.parseBookingMulti(body);
+      const parsed = await api.parseBookingMulti(body).catch((err: any) => {
+        // Static PWA with no backend? Surface an actionable message so
+        // users know what to do instead of a cryptic 401/network error.
+        const msg = String(err?.message || err || "");
+        if (msg.toLowerCase().includes("no backend configured") || err?.name === "TypeError") {
+          throw new Error("AI auto-import needs the Travel Space backend. This build was deployed without one, so please add items manually — file share and offline features still work.");
+        }
+        if (msg.startsWith("401") || msg.startsWith("403")) {
+          throw new Error("AI auto-import isn't authorised on this deployment. Please add items manually.");
+        }
+        throw err;
+      });
       const items = (parsed?.items || []).filter((it: any) => it && it.category && it.category !== "unknown");
       if (items.length === 0) throw new Error(t("autoAdd.noneDetected"));
 

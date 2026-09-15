@@ -1,6 +1,6 @@
 import React from "react";
 import { View, Text, StyleSheet, Modal, Pressable, Platform } from "react-native";
-import { WebView } from "react-native-webview";
+import { WebView } from "@/src/components/CrossWebView";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Icon from "@react-native-vector-icons/material-design-icons";
 import { colors, radius, spacing } from "@/src/theme";
@@ -112,14 +112,16 @@ export function MapPickerModal({
             <Text style={s.confirmTxt}>Use</Text>
           </Pressable>
         </View>
-        <WebView
-          originWhitelist={["*"]}
-          source={{ html: LEAFLET_HTML(lat, lon) }}
-          onMessage={handleMsg}
-          style={{ flex: 1 }}
-          javaScriptEnabled
-          domStorageEnabled
-        />
+        <View style={{ flex: 1, minHeight: 300 }}>
+          <WebView
+            originWhitelist={["*"]}
+            source={{ html: LEAFLET_HTML(lat, lon) }}
+            onMessage={handleMsg}
+            style={{ flex: 1, width: "100%", height: "100%" }}
+            javaScriptEnabled
+            domStorageEnabled
+          />
+        </View>
         <View style={[s.footer, { paddingBottom: insets.bottom + spacing.md }]}>
           <Icon name="map-marker" size={18} color={colors.brandPrimary} />
           <Text style={s.footerTxt} numberOfLines={2}>

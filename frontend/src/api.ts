@@ -43,7 +43,8 @@ function isNetworkError(e: any): boolean {
     msg.includes("network") ||
     msg.includes("failed to fetch") ||
     msg.includes("load failed") ||
-    msg.includes("network request failed")
+    msg.includes("network request failed") ||
+    msg.includes("no backend configured")
   );
 }
 
@@ -53,6 +54,12 @@ function isNotFoundOrGone(e: any): boolean {
 }
 
 async function req<T = any>(path: string, init?: RequestInit): Promise<T> {
+  if (!BASE) {
+    // No backend URL configured (e.g. static Vercel PWA). Report as a
+    // network error so callers with local fallbacks (geocode, AI) can
+    // switch to a public direct-call path.
+    throw new Error("No backend configured");
+  }
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(init?.headers as Record<string, string> | undefined || {}),
@@ -65,6 +72,37 @@ async function req<T = any>(path: string, init?: RequestInit): Promise<T> {
   }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
+}
+
+// -- Direct-Nominatim helpers ---------------------------------------------
+// Used when no backend is configured or the backend is unreachable. OSM's
+// public search API is CORS-friendly and doesn't require auth. Please
+// respect their fair-use rate limits — this app makes at most a few
+// requests per user gesture.
+async function directNominatimSearch(q: string, lang?: string) {
+  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=5&addressdetails=1`;
+  const headers: Record<string, string> = { "Accept": "application/json" };
+  if (lang) headers["Accept-Language"] = lang;
+  const r = await fetch(url, { headers });
+  if (!r.ok) return { results: [] };
+  const data = await r.json();
+  return {
+    results: (data || []).map((item: any) => ({
+      display_name: item.display_name || "",
+      latitude: parseFloat(item.lat),
+      longitude: parseFloat(item.lon),
+    })).filter((x: any) => !isNaN(x.latitude) && !isNaN(x.longitude)),
+  };
+}
+
+async function directNominatimReverse(lat: number, lon: number, lang?: string) {
+  const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`;
+  const headers: Record<string, string> = { "Accept": "application/json" };
+  if (lang) headers["Accept-Language"] = lang;
+  const r = await fetch(url, { headers });
+  if (!r.ok) return { display_name: "", latitude: lat, longitude: lon };
+  const data = await r.json();
+  return { display_name: data?.display_name || "", latitude: lat, longitude: lon };
 }
 
 async function getWithMirror<T>(
@@ -273,12 +311,29 @@ export const api = {
   parseBookingMulti: (body: { text?: string; image_base64?: string; mime?: string }) =>
     req("/ai/parse-booking-multi", { method: "POST", body: JSON.stringify(body) }),
 
-  // Geo — remote only. Accept-Language lets Nominatim return names in the
-  // caller's language when possible.
-  geocode: (q: string, lang?: string) =>
-    req(`/geocode?q=${encodeURIComponent(q)}${lang ? `&lang=${lang}` : ""}`),
-  reverseGeocode: (lat: number, lon: number, lang?: string) =>
-    req(`/reverse-geocode?lat=${lat}&lon=${lon}${lang ? `&lang=${lang}` : ""}`),
+  // Geo — remote first, direct Nominatim fallback so it works even when
+  // the app is deployed as a static PWA with no backend behind it.
+  // Nominatim is public + CORS-enabled.
+  geocode: async (q: string, lang?: string) => {
+    if (BASE) {
+      try {
+        return await req(`/geocode?q=${encodeURIComponent(q)}${lang ? `&lang=${lang}` : ""}`);
+      } catch (e) {
+        if (!isNetworkError(e)) throw e;
+      }
+    }
+    return await directNominatimSearch(q, lang);
+  },
+  reverseGeocode: async (lat: number, lon: number, lang?: string) => {
+    if (BASE) {
+      try {
+        return await req(`/reverse-geocode?lat=${lat}&lon=${lon}${lang ? `&lang=${lang}` : ""}`);
+      } catch (e) {
+        if (!isNetworkError(e)) throw e;
+      }
+    }
+    return await directNominatimReverse(lat, lon, lang);
+  },
 
   // Public (no auth)
   publicTrip: (shareId: string) => req(`/public/trips/${shareId}`),

@@ -1,6 +1,6 @@
 import React from "react";
 import { View, Text, StyleSheet, ScrollView, Pressable } from "react-native";
-import { WebView } from "react-native-webview";
+import { WebView } from "@/src/components/CrossWebView";
 import { useQuery } from "@tanstack/react-query";
 import Icon from "@react-native-vector-icons/material-design-icons";
 
@@ -144,14 +144,16 @@ export default function MapTab({ trip }: { trip: Trip }) {
           </Text>
         </View>
       ) : (
-        <WebView
-          originWhitelist={["*"]}
-          source={{ html: buildHtml(points) }}
-          style={{ flex: 1, backgroundColor: colors.surface }}
-          javaScriptEnabled
-          domStorageEnabled
-          testID="trip-map-webview"
-        />
+        <View style={{ flex: 1, minHeight: 300 }} testID="trip-map-container">
+          <WebView
+            originWhitelist={["*"]}
+            source={{ html: buildHtml(points) }}
+            style={{ flex: 1, backgroundColor: colors.surface, width: "100%", height: "100%" }}
+            javaScriptEnabled
+            domStorageEnabled
+            testID="trip-map-webview"
+          />
+        </View>
       )}
     </View>
   );
