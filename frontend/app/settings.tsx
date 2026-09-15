@@ -1,12 +1,10 @@
 import React from "react";
-import { View, Text, StyleSheet, ScrollView, Pressable, Alert, ActivityIndicator, Platform } from "react-native";
+import { View, Text, StyleSheet, ScrollView, Pressable, Alert, Platform } from "react-native";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Icon from "@react-native-vector-icons/material-design-icons";
 
 import { colors, radius, spacing } from "@/src/theme";
-import { useAuth } from "@/src/auth";
-import { api } from "@/src/api";
 import { LANGUAGES, useI18n, type Lang } from "@/src/i18n";
 import { localApi } from "@/src/localStore";
 
@@ -14,35 +12,6 @@ export default function SettingsPage() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { t, lang, setLang } = useI18n();
-  const { user, isLocal, signIn, signOut } = useAuth();
-  const [deleting, setDeleting] = React.useState(false);
-
-  const confirmDelete = () => {
-    if (deleting) return;
-    Alert.alert(
-      t("settings.deleteAccount"),
-      t("settings.deleteAccountBody"),
-      [
-        { text: t("common.cancel"), style: "cancel" },
-        {
-          text: t("common.delete"),
-          style: "destructive",
-          onPress: async () => {
-            setDeleting(true);
-            try {
-              await api.deleteAccount();
-              await signOut();
-              router.replace("/login");
-            } catch (e: any) {
-              Alert.alert("Error", e?.message || "Try again.");
-            } finally {
-              setDeleting(false);
-            }
-          },
-        },
-      ],
-    );
-  };
 
   const clearLocal = () => {
     Alert.alert(
@@ -105,39 +74,14 @@ export default function SettingsPage() {
           })}
         </View>
 
-        <Text style={s.sectionLabel}>{t("settings.account")}</Text>
-        {isLocal ? (
-          <>
-            <Pressable style={s.actionCard} onPress={signIn} testID="settings-signin-btn">
-              <Icon name="google" size={20} color={colors.brandPrimary} />
-              <View style={{ flex: 1 }}>
-                <Text style={s.actionTitle}>{t("settings.signInPrompt")}</Text>
-                <Text style={s.actionBody}>{t("settings.signInPromptBody")}</Text>
-              </View>
-              <Icon name="chevron-right" size={20} color={colors.muted} />
-            </Pressable>
-            <View style={{ height: spacing.md }} />
-            <Pressable style={s.dangerBtn} onPress={clearLocal} testID="clear-local-btn">
-              <Icon name="delete-sweep-outline" size={18} color={colors.error} />
-              <View style={{ flex: 1 }}>
-                <Text style={s.dangerTitle}>{t("settings.clearLocal")}</Text>
-                <Text style={s.dangerBody}>{t("settings.clearLocalBody")}</Text>
-              </View>
-            </Pressable>
-          </>
-        ) : user ? (
-          <Pressable style={s.dangerBtn} onPress={confirmDelete} disabled={deleting} testID="delete-account-btn">
-            {deleting ? (
-              <ActivityIndicator color={colors.error} />
-            ) : (
-              <Icon name="trash-can-outline" size={18} color={colors.error} />
-            )}
-            <View style={{ flex: 1 }}>
-              <Text style={s.dangerTitle}>{t("settings.deleteAccount")}</Text>
-              <Text style={s.dangerBody}>{t("settings.deleteAccountBody")}</Text>
-            </View>
-          </Pressable>
-        ) : null}
+        <Text style={s.sectionLabel}>{t("settings.localData")}</Text>
+        <Pressable style={s.dangerBtn} onPress={clearLocal} testID="clear-local-btn">
+          <Icon name="delete-sweep-outline" size={18} color={colors.error} />
+          <View style={{ flex: 1 }}>
+            <Text style={s.dangerTitle}>{t("settings.clearLocal")}</Text>
+            <Text style={s.dangerBody}>{t("settings.clearLocalBody")}</Text>
+          </View>
+        </Pressable>
       </ScrollView>
     </View>
   );

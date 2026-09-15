@@ -1,11 +1,14 @@
 # Travel Space — Travel Planning App (PRD)
 
 ## Overview
-Single-user travel companion for planning trips (Upcoming/Past/Wishlist) with per-trip flights, transport, stays, attractions, tickets, budget, auto-generated itinerary and map, shareable read-only trip links, AI-powered booking imports, currency conversion, and one-tap PDF export.
+100% local, no-login travel companion for planning trips (Upcoming/Past/Wishlist) with per-trip flights, transport, stays, attractions, tickets, budget, auto-generated itinerary and map, AI-powered booking imports, currency conversion, and one-tap PDF export. Everything lives on-device — no accounts, no sign-in, no cloud lock-in.
 
-- **QR handoff (compact trips)**: Share sheet → "QR handoff" renders a scannable QR code (deflate + base64url encoded trip bundle). Other phone opens Home → "Scan a trip QR" → uses the device camera (native) or a paste-payload fallback (web). Bundle is compressed with pako; if the resulting payload exceeds ~2200 chars, the sheet tells the user to fall back to file export.
-- **Guest AI import works without login**: `/api/ai/parse-booking`, `/api/ai/parse-booking-multi`, `/api/geocode`, `/api/reverse-geocode`, `/api/exchange-rates` now accept anonymous callers. Rate limiting keys off `user_id` when signed in and falls back to `X-Forwarded-For` / client IP for guests.
-- **Cross-platform file reading**: New `readUriAsBase64` helper falls back from expo-file-system/legacy to `fetch(uri).blob() → FileReader.readAsDataURL` when the legacy call throws (Expo Go on Android, web `blob:` URLs). Fixes PDF and image imports in AutoAddSheet, Documents, and Tickets.
+- **No login. Anywhere.** The old Emergent Google Sign-In is gone. The `/login` route is deleted; the auth context always returns local-mode. Sign-in/logout icons removed from Home; account-delete section removed from Settings. Guest banner removed.
+- **Home "+" bottom-sheet menu**: FAB now opens a menu with Create new trip / Import trip file / Scan a trip QR. Menu strings are fully i18n'd.
+- **QR button on trip detail top bar**: dedicated `qrcode` icon next to Share on every trip's cover — one tap shows the trip QR immediately.
+- **Additive-only merge**: `mergeBundleIntoTrip` upserts sub-items by id — items that exist locally but aren't in the incoming bundle are never removed. Safe to accept partial updates from anyone.
+- **QR handoff (compact trips)**: Share sheet → "QR handoff" renders a scannable QR code (deflate + base64url encoded trip bundle). Receiver taps the "+" menu on Home → "Scan a trip QR" → camera scans it (native) or paste-payload fallback (web). Too-big trips fall back to file export.
+- **Cross-platform file reading**: New `readUriAsBase64` helper falls back from expo-file-system/legacy to `fetch(uri).blob() → FileReader.readAsDataURL` when the legacy call throws. Fixes PDF and image imports on Expo Go / web.
 
 - **Multi-language support (6 languages)**: In-app language picker (Settings → Language) with English, Chinese (Simplified), Spanish, French, German, Japanese. Nominatim geocoding uses the active language via `Accept-Language`, so addresses like "上海浦东国际机场" render as "Shanghai Pudong International Airport" for English users.
 - **Auto-sort by date**: Every list tab (Flights, Transport, Stays, Attractions, Tickets, Documents) is sorted chronologically. Undated items sink to the bottom. Tickets are sorted by the date of the item they're linked to.

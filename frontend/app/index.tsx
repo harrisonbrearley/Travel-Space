@@ -20,10 +20,10 @@ import { colors, radius, spacing } from "@/src/theme";
 import { niceDate } from "@/src/components/form";
 import { useAuth } from "@/src/auth";
 import { useI18n } from "@/src/i18n";
-import { useSync } from "@/src/syncWorker";
-import { ImportGuestModal, shouldPromptImport } from "@/src/components/ImportGuestModal";
+import { ImportGuestModal } from "@/src/components/ImportGuestModal";
 import { pickTripBundle, importAsNewTrip, findMergeCandidate, mergeBundleIntoTrip } from "@/src/utils/tripExport";
 import { QrHandoffSheet } from "@/src/components/QrHandoffSheet";
+import { AddTripMenu } from "@/src/components/AddTripMenu";
 
 const TABS = [
   { key: "upcoming" as const, labelKey: "home.tabs.upcoming" },
@@ -36,15 +36,15 @@ const PLACEHOLDER = require("../assets/images/travel-space-cover.png");
 export default function Home() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { user, isLocal, signIn, signOut } = useAuth();
+  const { user } = useAuth();
   const { t } = useI18n();
-  const sync = useSync();
   const qc = useQueryClient();
   const [tab, setTab] = React.useState<Trip["category"]>("upcoming");
   const [importOpen, setImportOpen] = React.useState(false);
   const [qrOpen, setQrOpen] = React.useState(false);
+  const [addOpen, setAddOpen] = React.useState(false);
   const { data, isLoading, refetch, isRefetching } = useQuery<Trip[]>({
-    queryKey: ["trips", isLocal ? "local" : "remote"],
+    queryKey: ["trips", "local"],
     queryFn: api.listTrips,
   });
 
@@ -80,14 +80,8 @@ export default function Home() {
     }
   }, [qc, router]);
 
-  // First-time import prompt for freshly signed-in users who still have guest data
-  React.useEffect(() => {
-    if (isLocal) return;
-    if (!user) return;
-    shouldPromptImport().then((yes) => {
-      if (yes) setImportOpen(true);
-    });
-  }, [user, isLocal]);
+  // No sign-in prompt anymore — everything is local.
+  React.useEffect(() => {}, [user]);
 
   const trips = React.useMemo(() => {
     return (data || []).filter((t) => t.category === tab);
@@ -115,13 +109,6 @@ export default function Home() {
           >
             <Icon name="help-circle-outline" size={22} color={colors.onSurface} />
           </Pressable>
-          <Pressable
-            testID="logout-btn"
-            onPress={isLocal ? signIn : signOut}
-            style={s.helpBtn}
-          >
-            <Icon name={isLocal ? "login" : "logout"} size={20} color={colors.onSurface} />
-          </Pressable>
         </View>
       </View>
 
@@ -143,46 +130,8 @@ export default function Home() {
         </View>
       </View>
 
-      {isLocal ? (
-        <View style={s.guestBanner} testID="guest-banner">
-          <Icon name="cloud-off-outline" size={14} color={colors.onBrandTertiary} />
-          <Text style={s.guestBannerTxt}>{t("home.guestMode")}</Text>
-          <Pressable onPress={signIn} testID="guest-signin-btn">
-            <Text style={s.guestBannerLink}>{t("common.signIn")}</Text>
-          </Pressable>
-        </View>
-      ) : !sync.online ? (
-        <View style={[s.guestBanner, { backgroundColor: colors.surfaceTertiary }]} testID="offline-banner">
-          <Icon name="cloud-off-outline" size={14} color={colors.muted} />
-          <Text style={[s.guestBannerTxt, { color: colors.muted }]}>
-            {sync.pending > 0
-              ? t("home.offlinePending", { n: sync.pending })
-              : t("home.offlineIdle")}
-          </Text>
-        </View>
-      ) : sync.syncing || sync.pending > 0 ? (
-        <View style={s.syncBanner} testID="sync-banner">
-          <Icon name="cloud-sync-outline" size={14} color={colors.onBrandTertiary} />
-          <Text style={s.guestBannerTxt}>
-            {sync.syncing ? t("home.syncing", { n: sync.pending }) : t("home.waiting", { n: sync.pending })}
-          </Text>
-          {!sync.syncing && (
-            <Pressable onPress={sync.triggerSync}>
-              <Text style={s.guestBannerLink}>{t("common.retry")}</Text>
-            </Pressable>
-          )}
-        </View>
-      ) : sync.failed.length > 0 ? (
-        <View style={[s.guestBanner, { backgroundColor: colors.surfaceTertiary }]} testID="failed-banner">
-          <Icon name="alert-circle-outline" size={14} color={colors.warning} />
-          <Text style={[s.guestBannerTxt, { color: colors.muted }]}>
-            {t("home.failed", { n: sync.failed.length })}
-          </Text>
-          <Pressable onPress={sync.dismissFailed} testID="failed-dismiss">
-            <Text style={s.guestBannerLink}>{t("common.dismiss")}</Text>
-          </Pressable>
-        </View>
-      ) : null}
+      {/* Local-only mode is the default now; no guest banner needed. */}
+      {null}
 
       <FlatList
         data={trips}
@@ -202,22 +151,6 @@ export default function Home() {
               <Icon name="airplane" size={48} color={colors.muted} />
               <Text style={s.emptyTitle}>{t("home.empty", { tab: t(`home.tabs.${tab}`).toLowerCase() })}</Text>
               <Text style={s.emptySub}>{t("home.emptySub")}</Text>
-              <Pressable
-                onPress={handleImportTrip}
-                style={s.importCta}
-                testID="home-import-trip-btn"
-              >
-                <Icon name="upload-outline" size={16} color={colors.brandPrimary} />
-                <Text style={s.importCtaTxt}>{t("home.importTrip")}</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => setQrOpen(true)}
-                style={[s.importCta, { marginTop: spacing.sm }]}
-                testID="home-scan-qr-btn"
-              >
-                <Icon name="qrcode-scan" size={16} color={colors.brandPrimary} />
-                <Text style={s.importCtaTxt}>Scan a trip QR</Text>
-              </Pressable>
             </View>
           ) : null
         }
@@ -226,7 +159,7 @@ export default function Home() {
 
       <Pressable
         testID="create-trip-fab"
-        onPress={() => router.push("/trip/new")}
+        onPress={() => setAddOpen(true)}
         style={[s.fab, { bottom: 24 + insets.bottom }]}
       >
         <Icon name="plus" size={26} color={colors.onBrandPrimary} />
@@ -237,6 +170,13 @@ export default function Home() {
         visible={qrOpen}
         onClose={() => setQrOpen(false)}
         onImported={(id) => router.push(`/trip/${id}`)}
+      />
+      <AddTripMenu
+        visible={addOpen}
+        onClose={() => setAddOpen(false)}
+        onCreate={() => router.push("/trip/new")}
+        onImportFile={handleImportTrip}
+        onScanQr={() => setQrOpen(true)}
       />
     </View>
   );

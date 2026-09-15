@@ -46,18 +46,6 @@ const MODES: { key: Mode; label: string; icon: string; description: string }[] =
     icon: "link-variant",
     description: "Anyone with the link sees a beautiful web view. They can't edit anything.",
   },
-  {
-    key: "collab",
-    label: "Invite to trip",
-    icon: "account-multiple-plus",
-    description: "They join the same trip. Their edits sync with yours in real time.",
-  },
-  {
-    key: "copy",
-    label: "Send a copy",
-    icon: "content-duplicate",
-    description: "They get their own private copy. Your trip stays untouched.",
-  },
 ];
 
 export function ShareOptionsSheet({

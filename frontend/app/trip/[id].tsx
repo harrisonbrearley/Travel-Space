@@ -18,6 +18,7 @@ import { colors, radius, spacing } from "@/src/theme";
 import { niceDate } from "@/src/components/form";
 import { AutoAddSheet } from "@/src/components/AutoAddSheet";
 import { ShareOptionsSheet } from "@/src/components/ShareOptionsSheet";
+import { QrHandoffSheet } from "@/src/components/QrHandoffSheet";
 
 import ItineraryTab from "@/src/components/tabs/Itinerary";
 import MapTab from "@/src/components/tabs/Map";
@@ -59,6 +60,7 @@ export default function TripDetailScreen() {
   const [focusId, setFocusId] = React.useState<string>("");
   const [autoAdd, setAutoAdd] = React.useState(false);
   const [shareSheet, setShareSheet] = React.useState(false);
+  const [showQr, setShowQr] = React.useState(false);
 
   const { data: trip } = useQuery<Trip>({
     queryKey: ["trip", id],
@@ -122,6 +124,9 @@ export default function TripDetailScreen() {
           <View style={{ flexDirection: "row", gap: spacing.sm }}>
             <Pressable onPress={() => setAutoAdd(true)} style={s.iconBtn} testID="auto-add-btn">
               <Icon name="auto-fix" size={22} color="#fff" />
+            </Pressable>
+            <Pressable onPress={() => setShowQr(true)} style={s.iconBtn} testID="trip-qr-btn">
+              <Icon name="qrcode" size={20} color="#fff" />
             </Pressable>
             <Pressable onPress={share} style={s.iconBtn} testID="share-trip-btn">
               <Icon name="share-variant-outline" size={20} color="#fff" />
@@ -199,6 +204,13 @@ export default function TripDetailScreen() {
         visible={shareSheet}
         onClose={() => setShareSheet(false)}
         trip={trip}
+      />
+
+      <QrHandoffSheet
+        visible={showQr}
+        onClose={() => setShowQr(false)}
+        tripId={trip.id}
+        onImported={(id) => router.push(`/trip/${id}`)}
       />
     </View>
   );

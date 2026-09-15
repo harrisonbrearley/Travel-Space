@@ -166,9 +166,11 @@ export async function importAsNewTrip(bundle: TripBundle): Promise<string> {
   return newTripId;
 }
 
-// Merge: upserts sub-items by id into an existing trip. Any sub-item
-// with a matching id is patched; new ids are added. The trip's top-level
-// fields aren't touched (avoid clobbering the current traveller's edits).
+// Merge: ADDS or UPDATES sub-items by id into an existing trip. It NEVER
+// deletes anything the target has that the incoming bundle doesn't — this
+// is intentional so travellers can safely accept a partial update from
+// someone without losing their own items. The trip's top-level fields
+// aren't touched either (avoid clobbering the current traveller's edits).
 // Returns the number of items added / updated.
 export async function mergeBundleIntoTrip(bundle: TripBundle, targetTripId: string): Promise<number> {
   let touched = 0;
@@ -177,7 +179,9 @@ export async function mergeBundleIntoTrip(bundle: TripBundle, targetTripId: stri
     for (const r of rows) {
       const local = { ...r, trip_id: targetTripId };
       try {
-        // upsert semantics via local API: create if new, update if existing
+        // additive upsert: create if new, update-in-place if the id
+        // already exists. We never remove target items that aren't in
+        // the incoming bundle.
         const list: any[] = await localApi.list(kind, targetTripId);
         const existing = list.find((x) => x.id === local.id);
         if (existing) {

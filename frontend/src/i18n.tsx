@@ -119,6 +119,15 @@ const en = {
     budget: "Budget",
     documents: "Documents",
   },
+  addMenu: {
+    title: "Add a trip",
+    create: "Create new trip",
+    createBody: "Start from a blank trip and fill it in.",
+    importFile: "Import trip file",
+    importFileBody: "Open a .travelspace.json a friend shared.",
+    scanQr: "Scan a trip QR",
+    scanQrBody: "Point your camera at someone's trip QR.",
+  },
   share: {
     exportJson: "Export trip file",
     exportJsonBody: "Save the whole trip (all tabs) as a Travel Space file. Share it via AirDrop, Bluetooth, email, or WiFi.",
@@ -197,6 +206,15 @@ const zh: DeepPartial<Dict> = {
     noneDetected: "未检测到预订。请尝试更清晰的图片或直接粘贴文本。",
   },
   tabs: { itinerary: "行程", map: "地图", flights: "航班", transport: "交通", stays: "住宿", attractions: "景点", tickets: "票据", budget: "预算", documents: "文件" },
+  addMenu: {
+    title: "添加行程",
+    create: "创建新行程",
+    createBody: "从空白开始填写。",
+    importFile: "导入行程文件",
+    importFileBody: "打开朋友分享的 .travelspace.json 文件。",
+    scanQr: "扫描行程二维码",
+    scanQrBody: "对准其他人的行程二维码。",
+  },
   share: {
       exportJson: "导出行程文件",
     exportJsonBody: "将整个行程(所有标签页)保存为文件。可通过 AirDrop、蓝牙、邮件或 WiFi 分享。",
