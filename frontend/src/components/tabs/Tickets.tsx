@@ -4,6 +4,7 @@ import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
+import { readUriAsBase64 } from "@/src/utils/fileRead";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Icon from "@react-native-vector-icons/material-design-icons";
 
@@ -100,7 +101,7 @@ export default function TicketsTab({ trip, nav }: { trip: Trip; nav: TabNav }) {
     if (res.canceled || !res.assets?.[0]) return;
     const a = res.assets[0];
     try {
-      const b64 = await FileSystem.readAsStringAsync(a.uri, { encoding: FileSystem.EncodingType.Base64 });
+      const b64 = await readUriAsBase64(a.uri);
       const decoded = Math.floor((b64.length * 3) / 4);
       if (decoded > 6 * 1024 * 1024) {
         Alert.alert("File too large", "Maximum PDF size is 6 MB.");

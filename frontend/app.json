@@ -11,7 +11,8 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.emergent.exploreitinerary.woghrg",
       "infoPlist": {
-        "NSPhotoLibraryUsageDescription": "Add photos to your trips and tickets."
+        "NSPhotoLibraryUsageDescription": "Add photos to your trips and tickets.",
+        "NSCameraUsageDescription": "Scan trip QR codes shared by other travellers."
       }
     },
     "android": {
@@ -21,7 +22,8 @@
       },
       "package": "com.emergent.exploreitinerary.woghrg",
       "permissions": [
-        "READ_MEDIA_IMAGES"
+        "READ_MEDIA_IMAGES",
+        "CAMERA"
       ]
     },
     "web": {
@@ -49,6 +51,12 @@
         "expo-image-picker",
         {
           "photosPermission": "Add photos to your trips and tickets."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Scan trip QR codes shared by other travellers."
         }
       ],
       "expo-sharing"

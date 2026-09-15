@@ -23,6 +23,7 @@ import { useI18n } from "@/src/i18n";
 import { useSync } from "@/src/syncWorker";
 import { ImportGuestModal, shouldPromptImport } from "@/src/components/ImportGuestModal";
 import { pickTripBundle, importAsNewTrip, findMergeCandidate, mergeBundleIntoTrip } from "@/src/utils/tripExport";
+import { QrHandoffSheet } from "@/src/components/QrHandoffSheet";
 
 const TABS = [
   { key: "upcoming" as const, labelKey: "home.tabs.upcoming" },
@@ -41,6 +42,7 @@ export default function Home() {
   const qc = useQueryClient();
   const [tab, setTab] = React.useState<Trip["category"]>("upcoming");
   const [importOpen, setImportOpen] = React.useState(false);
+  const [qrOpen, setQrOpen] = React.useState(false);
   const { data, isLoading, refetch, isRefetching } = useQuery<Trip[]>({
     queryKey: ["trips", isLocal ? "local" : "remote"],
     queryFn: api.listTrips,
@@ -208,6 +210,14 @@ export default function Home() {
                 <Icon name="upload-outline" size={16} color={colors.brandPrimary} />
                 <Text style={s.importCtaTxt}>{t("home.importTrip")}</Text>
               </Pressable>
+              <Pressable
+                onPress={() => setQrOpen(true)}
+                style={[s.importCta, { marginTop: spacing.sm }]}
+                testID="home-scan-qr-btn"
+              >
+                <Icon name="qrcode-scan" size={16} color={colors.brandPrimary} />
+                <Text style={s.importCtaTxt}>Scan a trip QR</Text>
+              </Pressable>
             </View>
           ) : null
         }
@@ -223,6 +233,11 @@ export default function Home() {
       </Pressable>
 
       <ImportGuestModal visible={importOpen} onClose={() => setImportOpen(false)} />
+      <QrHandoffSheet
+        visible={qrOpen}
+        onClose={() => setQrOpen(false)}
+        onImported={(id) => router.push(`/trip/${id}`)}
+      />
     </View>
   );
 }

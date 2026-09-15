@@ -3,6 +3,10 @@
 ## Overview
 Single-user travel companion for planning trips (Upcoming/Past/Wishlist) with per-trip flights, transport, stays, attractions, tickets, budget, auto-generated itinerary and map, shareable read-only trip links, AI-powered booking imports, currency conversion, and one-tap PDF export.
 
+- **QR handoff (compact trips)**: Share sheet → "QR handoff" renders a scannable QR code (deflate + base64url encoded trip bundle). Other phone opens Home → "Scan a trip QR" → uses the device camera (native) or a paste-payload fallback (web). Bundle is compressed with pako; if the resulting payload exceeds ~2200 chars, the sheet tells the user to fall back to file export.
+- **Guest AI import works without login**: `/api/ai/parse-booking`, `/api/ai/parse-booking-multi`, `/api/geocode`, `/api/reverse-geocode`, `/api/exchange-rates` now accept anonymous callers. Rate limiting keys off `user_id` when signed in and falls back to `X-Forwarded-For` / client IP for guests.
+- **Cross-platform file reading**: New `readUriAsBase64` helper falls back from expo-file-system/legacy to `fetch(uri).blob() → FileReader.readAsDataURL` when the legacy call throws (Expo Go on Android, web `blob:` URLs). Fixes PDF and image imports in AutoAddSheet, Documents, and Tickets.
+
 - **Multi-language support (6 languages)**: In-app language picker (Settings → Language) with English, Chinese (Simplified), Spanish, French, German, Japanese. Nominatim geocoding uses the active language via `Accept-Language`, so addresses like "上海浦东国际机场" render as "Shanghai Pudong International Airport" for English users.
 - **Auto-sort by date**: Every list tab (Flights, Transport, Stays, Attractions, Tickets, Documents) is sorted chronologically. Undated items sink to the bottom. Tickets are sorted by the date of the item they're linked to.
 - **Multi-item AI import**: `/api/ai/parse-booking-multi` returns every booking in a single input (spreadsheet, multi-flight screenshot, PDF). AutoAddSheet imports them all in one go and shows a per-address warning list for entries that couldn't be resolved.

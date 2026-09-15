@@ -4,6 +4,7 @@ import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
+import { readUriAsBase64 } from "@/src/utils/fileRead";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Icon from "@react-native-vector-icons/material-design-icons";
 
@@ -112,7 +113,7 @@ export default function DocumentsTab({ trip, nav }: { trip: Trip; nav: TabNav })
     setUploading(true);
     try {
       const asset = res.assets[0];
-      const b64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: FileSystem.EncodingType.Base64 });
+      const b64 = await readUriAsBase64(asset.uri);
       const mime = asset.mimeType || (asset.uri.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg");
       const name = asset.fileName || `photo-${Date.now()}.${mime.includes("png") ? "png" : "jpg"}`;
       setModal({
@@ -141,7 +142,7 @@ export default function DocumentsTab({ trip, nav }: { trip: Trip; nav: TabNav })
     setUploading(true);
     try {
       const asset = res.assets[0];
-      const b64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: FileSystem.EncodingType.Base64 });
+      const b64 = await readUriAsBase64(asset.uri);
       const mime = asset.mimeType || "";
       const kind = inferKind(mime, asset.name);
       const decoded = Math.floor((b64.length * 3) / 4);

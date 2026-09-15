@@ -15,6 +15,7 @@ import {
   importAsNewTrip,
   mergeBundleIntoTrip,
 } from "@/src/utils/tripExport";
+import { QrHandoffSheet } from "@/src/components/QrHandoffSheet";
 import { useQueryClient } from "@tanstack/react-query";
 
 type Opt = { key: string; label: string; icon: string; description?: string };
@@ -76,6 +77,7 @@ export function ShareOptionsSheet({
   const [exporting, setExporting] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [localBusy, setLocalBusy] = React.useState(false);
+  const [qrOpen, setQrOpen] = React.useState(false);
   const rates = useRates();
 
   React.useEffect(() => {
@@ -398,6 +400,23 @@ export function ShareOptionsSheet({
             </View>
             <Icon name="chevron-right" size={20} color={colors.muted} />
           </Pressable>
+
+          <View style={{ height: spacing.sm }} />
+
+          <Pressable
+            onPress={() => setQrOpen(true)}
+            style={s.modeCard}
+            testID="qr-handoff-btn"
+          >
+            <View style={s.modeIcon}>
+              <Icon name="qrcode-scan" size={20} color={colors.brandPrimary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.modeLabel}>QR handoff</Text>
+              <Text style={s.modeDesc}>Small trip? Show a QR code and let the other phone scan it — no files, no apps.</Text>
+            </View>
+            <Icon name="chevron-right" size={20} color={colors.muted} />
+          </Pressable>
         </ScrollView>
 
         <View style={[s.footer, { paddingBottom: insets.bottom + spacing.md }]}>
@@ -416,6 +435,13 @@ export function ShareOptionsSheet({
             <Text style={{ color: colors.onBrandPrimary, fontWeight: "600" }}>Share</Text>
           </Pressable>
         </View>
+
+        <QrHandoffSheet
+          visible={qrOpen}
+          onClose={() => setQrOpen(false)}
+          tripId={trip.id}
+          onImported={(id) => { onClose(); router.push(`/trip/${id}`); }}
+        />
       </View>
     </Modal>
   );

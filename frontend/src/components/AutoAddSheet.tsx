@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, Modal, Pressable, ScrollView, ActivityIndicator
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
-import * as FileSystem from "expo-file-system/legacy";
+import { readUriAsBase64 } from "@/src/utils/fileRead";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import Icon from "@react-native-vector-icons/material-design-icons";
@@ -203,9 +203,13 @@ export function AutoAddSheet({
       const body: any = {};
       if (text.trim()) body.text = text.trim();
       if (fileUri) {
-        const b64 = await FileSystem.readAsStringAsync(fileUri, { encoding: FileSystem.EncodingType.Base64 });
-        body.image_base64 = b64;
-        body.mime = fileMime || (fileUri.toLowerCase().endsWith(".pdf") ? "application/pdf" : "image/jpeg");
+        try {
+          const b64 = await readUriAsBase64(fileUri);
+          body.image_base64 = b64;
+          body.mime = fileMime || (fileUri.toLowerCase().endsWith(".pdf") ? "application/pdf" : "image/jpeg");
+        } catch (readErr: any) {
+          throw new Error(`Couldn't read that file. Try picking it again (${readErr?.message || "read failed"}).`);
+        }
       }
       if (!body.text && !body.image_base64) throw new Error("Paste text or add a screenshot / PDF first.");
 

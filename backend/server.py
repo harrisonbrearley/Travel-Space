@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Query, Header, Depends, Body
+from fastapi import FastAPI, APIRouter, HTTPException, Query, Header, Depends, Body, Request
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -93,7 +93,22 @@ async def get_current_user(
     return user
 
 
+async def get_optional_user(
+    authorization: Optional[str] = Header(None),
+) -> Optional[dict]:
+    """Like get_current_user but returns None instead of 401 when no
+    valid session is present. Used by endpoints (AI, geocoding) that we
+    want the guest / offline-only user to reach too."""
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return None
+    try:
+        return await get_current_user(authorization)
+    except HTTPException:
+        return None
+
+
 CurrentUser = Depends(get_current_user)
+OptionalUser = Depends(get_optional_user)
 
 
 # ============= AUTH ENDPOINTS =============
@@ -874,7 +889,7 @@ async def public_trip(share_id: str):
 async def geocode(
     q: str = Query(..., min_length=2, max_length=200),
     lang: Optional[str] = Query(None, max_length=10),
-    user: dict = CurrentUser,
+    user: Optional[dict] = OptionalUser,
 ):
     headers = {"User-Agent": "TravelSpace/1.0 (travel-app)"}
     if lang:
@@ -905,7 +920,7 @@ async def reverse_geocode(
     lat: float,
     lon: float,
     lang: Optional[str] = Query(None, max_length=10),
-    user: dict = CurrentUser,
+    user: Optional[dict] = OptionalUser,
 ):
     if not (-90 <= lat <= 90) or not (-180 <= lon <= 180):
         raise HTTPException(400, "Bad coordinates")
@@ -931,7 +946,7 @@ CURRENCY_RE = re.compile(r"^[A-Z]{3}$")
 
 
 @api_router.get("/exchange-rates")
-async def exchange_rates(base: str = "USD", user: dict = CurrentUser):
+async def exchange_rates(base: str = "USD", user: Optional[dict] = OptionalUser):
     base = (base or "USD").upper()
     if not CURRENCY_RE.match(base):
         raise HTTPException(400, "Bad currency code")
@@ -957,20 +972,43 @@ async def exchange_rates(base: str = "USD", user: dict = CurrentUser):
 # ============= RATE LIMITER (per user) =============
 
 _RL_WINDOW = 60.0
-_RL_MAX = 10  # 10 AI calls per user per minute
+_RL_MAX = 10  # 10 AI calls per user (or per IP for guests) per minute
 _rl_calls: dict = defaultdict(deque)
 _rl_lock = asyncio.Lock()
 
 
-async def rate_limit_ai(user: dict):
+def _rl_key(user: Optional[dict], client_ip: str) -> str:
+    if user and user.get("user_id"):
+        return f"u:{user['user_id']}"
+    return f"ip:{client_ip or 'unknown'}"
+
+
+async def rate_limit_ai(user: Optional[dict], client_ip: str = ""):
     async with _rl_lock:
         now = time.time()
-        q = _rl_calls[user["user_id"]]
+        key = _rl_key(user, client_ip)
+        q = _rl_calls[key]
         while q and now - q[0] > _RL_WINDOW:
             q.popleft()
         if len(q) >= _RL_MAX:
             raise HTTPException(429, "Too many AI requests; please wait a minute")
         q.append(now)
+
+
+def _client_ip(request) -> str:
+    """Best-effort client IP for guest rate limiting."""
+    try:
+        h = request.headers
+        # honour common reverse-proxy headers first
+        fwd = h.get("x-forwarded-for") or h.get("x-real-ip")
+        if fwd:
+            return fwd.split(",")[0].strip()
+        client = getattr(request, "client", None)
+        if client and getattr(client, "host", None):
+            return client.host
+    except Exception:
+        pass
+    return ""
 
 
 # ============= AI FLIGHT PARSE =============
@@ -1012,8 +1050,8 @@ def _extract_json(text: str) -> dict:
 
 
 @api_router.post("/ai/parse-flight", response_model=ParsedFlight)
-async def parse_flight(req: ParseFlightRequest, user: dict = CurrentUser):
-    await rate_limit_ai(user)
+async def parse_flight(req: ParseFlightRequest, request: Request, user: Optional[dict] = OptionalUser):
+    await rate_limit_ai(user, _client_ip(request))
     if not EMERGENT_LLM_KEY:
         raise HTTPException(500, "LLM key not configured")
 
@@ -1125,9 +1163,9 @@ Rules:
 
 
 @api_router.post("/ai/parse-booking-multi", response_model=ParsedBookingMulti)
-async def parse_booking_multi(req: ParseBookingRequest, user: dict = CurrentUser):
+async def parse_booking_multi(req: ParseBookingRequest, request: Request, user: Optional[dict] = OptionalUser):
     """Multi-item extractor. Returns every booking detected in the input."""
-    await rate_limit_ai(user)
+    await rate_limit_ai(user, _client_ip(request))
     if not EMERGENT_LLM_KEY:
         raise HTTPException(500, "LLM key not configured")
     if not req.text and not req.image_base64:
@@ -1227,8 +1265,8 @@ async def parse_booking_multi(req: ParseBookingRequest, user: dict = CurrentUser
 
 
 @api_router.post("/ai/parse-booking", response_model=ParsedBooking)
-async def parse_booking(req: ParseBookingRequest, user: dict = CurrentUser):
-    await rate_limit_ai(user)
+async def parse_booking(req: ParseBookingRequest, request: Request, user: Optional[dict] = OptionalUser):
+    await rate_limit_ai(user, _client_ip(request))
     if not EMERGENT_LLM_KEY:
         raise HTTPException(500, "LLM key not configured")
     if not req.text and not req.image_base64:
