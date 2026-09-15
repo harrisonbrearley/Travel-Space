@@ -11,6 +11,7 @@ import { FormModal, ListWrapper } from "@/src/components/tab-shell";
 import { LocationInput } from "@/src/components/LocationInput";
 import { CostInput } from "@/src/components/CostInput";
 import { formatMoney } from "@/src/currency";
+import { sortByDate, dateKeys } from "@/src/utils/sort";
 import type { TabNav } from "@/app/trip/[id]";
 
 const empty = (trip_id: string, currency: string): Flight => ({
@@ -40,10 +41,11 @@ export default function FlightsTab({ trip, nav }: { trip: Trip; nav: TabNav }) {
   const [aiText, setAiText] = React.useState("");
   const [showAI, setShowAI] = React.useState(false);
 
-  const { data: flights = [] } = useQuery<Flight[]>({
+  const { data: flightsRaw = [] } = useQuery<Flight[]>({
     queryKey: ["flights", trip.id],
     queryFn: () => api.list("flights", trip.id),
   });
+  const flights = React.useMemo(() => sortByDate(flightsRaw, [...dateKeys.flights]), [flightsRaw]);
   const { data: tickets = [] } = useQuery<Ticket[]>({
     queryKey: ["tickets", trip.id],
     queryFn: () => api.list("tickets", trip.id),
@@ -114,9 +116,9 @@ export default function FlightsTab({ trip, nav }: { trip: Trip; nav: TabNav }) {
                   <Text style={s.time}>{niceTime(f.arrival_datetime)}</Text>
                 </View>
               </View>
-              {f.layovers.length > 0 && (
+              {(f.layovers ?? []).length > 0 && (
                 <Text style={s.layoverText}>
-                  {f.layovers.length} layover{f.layovers.length > 1 ? "s" : ""}: {f.layovers.map((l) => l.location).join(", ")}
+                  {(f.layovers ?? []).length} layover{(f.layovers ?? []).length > 1 ? "s" : ""}: {(f.layovers ?? []).map((l) => l.location).join(", ")}
                 </Text>
               )}
               <View style={s.footRow}>
@@ -181,7 +183,7 @@ export default function FlightsTab({ trip, nav }: { trip: Trip; nav: TabNav }) {
               />
             </Field>
             <Field label="Departure date & time">
-              <DateTimeInput value={modal.departure_datetime} onChange={(v) => setModal({ ...modal, departure_datetime: v })} />
+              <DateTimeInput testID="input-departure-datetime" value={modal.departure_datetime} onChange={(v) => setModal({ ...modal, departure_datetime: v })} />
             </Field>
             <Field label="Arrival location">
               <LocationInput
@@ -191,7 +193,7 @@ export default function FlightsTab({ trip, nav }: { trip: Trip; nav: TabNav }) {
               />
             </Field>
             <Field label="Arrival date & time">
-              <DateTimeInput value={modal.arrival_datetime} onChange={(v) => setModal({ ...modal, arrival_datetime: v })} />
+              <DateTimeInput testID="input-arrival-datetime" value={modal.arrival_datetime} onChange={(v) => setModal({ ...modal, arrival_datetime: v })} />
             </Field>
 
             <Field label="Layovers">

@@ -604,3 +604,72 @@ agent_communication:
          • /app/test_reports/iteration_6.json
 
       No bugs found. No re-test needed. Nothing modified in application code.
+
+# ========== Round 8 — i18n + AI multi-item + local sync ==========
+
+## Main agent update (round 8):
+
+### What changed
+1. **i18n system** (`/app/frontend/src/i18n.tsx`) — 6 languages (EN, ZH, ES, FR, DE, JA)
+   with dot-path `t()` lookup, `{name}` and `{plural}` interpolation, AsyncStorage
+   persistence, and a device-locale guess on first launch. Wrapped in
+   `LanguageProvider` in `_layout.tsx`. Sync-getter `currentLang()` used by non-React
+   callers.
+2. **Settings screen** (`/app/frontend/app/settings.tsx`) — language picker + guest
+   "erase local trips" + optional Google sign-in upsell + delete-account for signed-in
+   users. Accessible from the new cog icon on Home.
+3. **Localized geocoding** — backend `/api/geocode` and `/api/reverse-geocode`
+   accept `lang` query param and forward it as `Accept-Language` to Nominatim.
+   `LocationInput` sends the active app language, so Chinese-named airports render
+   in English (or vice versa) automatically.
+4. **AI multi-item extractor** — new `POST /api/ai/parse-booking-multi` returns
+   `{items: [...]}`. Prompt updated to (a) return every booking found and (b)
+   default missing years to the future (next occurrence, never in the past). Legacy
+   single-item endpoint kept working by returning the first item.
+5. **AutoAddSheet rewrite** — calls the multi endpoint, imports every detected
+   booking, resolves each address through `autoMatchAddress()` (token-overlap
+   threshold 0.5). Unresolved addresses fall through as plain text and show a
+   summary alert listing which lines couldn't be matched.
+6. **Date sorting** — new `/app/frontend/src/utils/sort.ts`. Applied to Flights,
+   Transport, Stays, Attractions, Documents (by created_at) and Tickets
+   (sort by the date of the linked flight/transport/stay/attraction; unlinked at
+   the bottom).
+7. **Device-to-device trip sync** (`/app/frontend/src/utils/tripExport.ts`) —
+   exports the entire trip (metadata + all sub-items + document blobs) as
+   `travelspace.trip.v1` JSON. Native uses expo-sharing; web triggers a browser
+   download. Import via DocumentPicker either merges (upsert-by-id) or adds a
+   fresh copy. New "Import a trip file" CTA on the empty state of Home; also
+   surfaced inside the Share sheet under "Device to device".
+8. **Login screen** — guest button is now primary; Google is secondary. Copy
+   emphasises that everything works offline.
+
+### Files touched
+- Backend: `/app/backend/server.py` (geocode lang, universal-system prompt,
+  new parse-booking-multi endpoint).
+- Frontend new: `src/i18n.tsx`, `src/utils/sort.ts`, `src/utils/geoMatch.ts`,
+  `src/utils/tripExport.ts`, `app/settings.tsx`.
+- Frontend modified: `app/_layout.tsx`, `app/index.tsx`, `app/login.tsx`,
+  `src/api.ts`, `src/components/LocationInput.tsx`, `src/components/AutoAddSheet.tsx`
+  (full rewrite), `src/components/ShareOptionsSheet.tsx`, plus all six list tabs
+  (Flights, Transport, Stays, Attractions, Tickets, Documents).
+
+### Manual verification
+- Login → Guest → Home → Settings works. Language switch to 简体中文 immediately
+  translates Settings header, section labels, banners, and Home segmented control.
+- Backend health endpoint returns 200. No supervisor errors on backend restart.
+
+### Test ask
+Please regression-test:
+1. Backend: `/api/geocode?q=&lang=zh-CN` returns Chinese names when Nominatim
+   supports them.
+2. Backend: `/api/ai/parse-booking-multi` accepts (a) text with 2+ bookings and
+   returns `items[]` accordingly; (b) an image with a single booking (still
+   wrapped in items[]); (c) a partial-year date like "March 15" resolves to a
+   future year.
+3. Backend: legacy `/api/ai/parse-booking` still works and returns the first
+   item's fields for backward compatibility.
+4. Frontend: settings language picker persists across reload.
+5. Frontend: date sort in each list tab (add three items with dates in reverse
+   order, verify list renders earliest first).
+6. Frontend: Home → Import a trip file with a valid `.json` export triggers the
+   correct merge-vs-new dialog when the trip id already exists locally.

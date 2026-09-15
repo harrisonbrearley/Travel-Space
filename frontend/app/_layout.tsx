@@ -11,6 +11,7 @@ import { ErrorBoundary } from "@/src/components/error-boundary";
 import { queryClient } from "@/src/query-client";
 import { AuthProvider, useAuth } from "@/src/auth";
 import { SyncProvider } from "@/src/syncWorker";
+import { LanguageProvider } from "@/src/i18n";
 import { setupPwa } from "@/src/pwa";
 import { colors } from "@/src/theme";
 
@@ -67,11 +68,13 @@ export default function RootLayout() {
           <QueryClientProvider client={queryClient}>
             <StatusBar style="dark" />
             <AuthProvider>
-              <AuthGate>
-                <SyncGateway>
-                  <Stack screenOptions={{ headerShown: false, animation: "slide_from_right" }} />
-                </SyncGateway>
-              </AuthGate>
+              <LanguageProvider>
+                <AuthGate>
+                  <SyncGateway>
+                    <Stack screenOptions={{ headerShown: false, animation: "slide_from_right" }} />
+                  </SyncGateway>
+                </AuthGate>
+              </LanguageProvider>
             </AuthProvider>
           </QueryClientProvider>
         </SafeAreaProvider>

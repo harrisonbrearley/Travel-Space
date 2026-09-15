@@ -11,6 +11,7 @@ import { FormModal, ListWrapper } from "@/src/components/tab-shell";
 import { LocationInput } from "@/src/components/LocationInput";
 import { CostInput } from "@/src/components/CostInput";
 import { formatMoney } from "@/src/currency";
+import { sortByDate, dateKeys } from "@/src/utils/sort";
 import type { TabNav } from "@/app/trip/[id]";
 
 const empty = (trip_id: string, currency: string): Stay => ({
@@ -25,7 +26,8 @@ export default function StaysTab({ trip, nav }: { trip: Trip; nav: TabNav }) {
   const qc = useQueryClient();
   const [modal, setModal] = React.useState<Stay | null>(null);
 
-  const { data = [] } = useQuery<Stay[]>({ queryKey: ["stays", trip.id], queryFn: () => api.list("stays", trip.id) });
+  const { data: rawData = [] } = useQuery<Stay[]>({ queryKey: ["stays", trip.id], queryFn: () => api.list("stays", trip.id) });
+  const data = React.useMemo(() => sortByDate(rawData, [...dateKeys.stays]), [rawData]);
   const { data: tickets = [] } = useQuery<Ticket[]>({ queryKey: ["tickets", trip.id], queryFn: () => api.list("tickets", trip.id) });
 
   const save = useMutation({
@@ -109,10 +111,10 @@ export default function StaysTab({ trip, nav }: { trip: Trip; nav: TabNav }) {
               />
             </Field>
             <Field label="Check-in">
-              <DateTimeInput value={modal.checkin_datetime} onChange={(v) => setModal({ ...modal, checkin_datetime: v })} />
+              <DateTimeInput testID="input-checkin-datetime" value={modal.checkin_datetime} onChange={(v) => setModal({ ...modal, checkin_datetime: v })} />
             </Field>
             <Field label="Check-out">
-              <DateTimeInput value={modal.checkout_datetime} onChange={(v) => setModal({ ...modal, checkout_datetime: v })} />
+              <DateTimeInput testID="input-checkout-datetime" value={modal.checkout_datetime} onChange={(v) => setModal({ ...modal, checkout_datetime: v })} />
             </Field>
             <Field label="Booking link">
               <Input value={modal.booking_link} onChangeText={(v) => setModal({ ...modal, booking_link: v })} placeholder="https://..." keyboardType="url" autoCapitalize="none" />

@@ -11,6 +11,7 @@ import { FormModal, ListWrapper } from "@/src/components/tab-shell";
 import { LocationInput } from "@/src/components/LocationInput";
 import { CostInput } from "@/src/components/CostInput";
 import { formatMoney } from "@/src/currency";
+import { sortByDate, dateKeys } from "@/src/utils/sort";
 import type { TabNav } from "@/app/trip/[id]";
 
 const TYPES: { key: Transport["transport_type"]; label: string; icon: string }[] = [
@@ -44,10 +45,11 @@ export default function TransportTab({ trip, nav }: { trip: Trip; nav: TabNav })
   const qc = useQueryClient();
   const [modal, setModal] = React.useState<Transport | null>(null);
 
-  const { data = [] } = useQuery<Transport[]>({
+  const { data: rawData = [] } = useQuery<Transport[]>({
     queryKey: ["transport", trip.id],
     queryFn: () => api.list("transport", trip.id),
   });
+  const data = React.useMemo(() => sortByDate(rawData, [...dateKeys.transport]), [rawData]);
   const { data: tickets = [] } = useQuery<Ticket[]>({
     queryKey: ["tickets", trip.id],
     queryFn: () => api.list("tickets", trip.id),
@@ -142,7 +144,7 @@ export default function TransportTab({ trip, nav }: { trip: Trip; nav: TabNav })
               />
             </Field>
             <Field label="Departure date & time">
-              <DateTimeInput value={modal.departure_datetime} onChange={(v) => setModal({ ...modal, departure_datetime: v })} />
+              <DateTimeInput testID="input-departure-datetime" value={modal.departure_datetime} onChange={(v) => setModal({ ...modal, departure_datetime: v })} />
             </Field>
             <Field label="Arrival location">
               <LocationInput
@@ -152,7 +154,7 @@ export default function TransportTab({ trip, nav }: { trip: Trip; nav: TabNav })
               />
             </Field>
             <Field label="Arrival date & time">
-              <DateTimeInput value={modal.arrival_datetime} onChange={(v) => setModal({ ...modal, arrival_datetime: v })} />
+              <DateTimeInput testID="input-arrival-datetime" value={modal.arrival_datetime} onChange={(v) => setModal({ ...modal, arrival_datetime: v })} />
             </Field>
             <Field label="Cost">
               <CostInput

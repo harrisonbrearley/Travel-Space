@@ -1,0 +1,44 @@
+{
+  "summary": "Round 8 regression + new-feature verification for Travel Space. Backend: 29/29 pytest cases in /app/backend/tests/backend_round8_test.py PASS in 9.3s — covers /api/geocode & /api/reverse-geocode with lang forwarding (en & zh-CN), /api/ai/parse-booking-multi (single flight, multi-train CSV → 2 items, future-year defaulting confirmed year >=2026 for a text with no year like 'March 15 at 09:30', 400 on empty/no-body, 401 unauthed), legacy /api/ai/parse-booking still returns single {category,data,ticket,confidence} shape, plus regression on /api/health (local + ingress), full CRUD on trips + flights + transport + stays + attractions + tickets + documents (blob stripped on list), invite lifecycle, /api/exchange-rates, /api/public/trips/{share_id}. Frontend (mobile viewport 375x667 via Playwright): (1) Login screen — guest-btn is FIRST (top=486) and google-signin-btn is SECOND (top=551) ✓; (2) Home empty state shows the 'Import a trip file' CTA with testID home-import-trip-btn ✓; (3) Language picker — Settings screen exposes testID lang-zh, tapping it immediately re-renders header as 设置 and section labels as 语言 / 账户; navigating back to home the segmented control shows 即将出发 / 已完成 / 心愿单 ✓; (4) Language persists across full page reload (localStorage key ts:lang) ✓; (5) Date sorting — with 3 flights inserted into localStorage in reverse-add order (Aug→Jul→Jun), the Flights tab renders JUN1 → JUL1 → AUG1 in ascending chronological order (JUN pos 144 < JUL 189 < AUG 234) ✓; (6) Share sheet — opening a trip → share-trip-btn shows a new 'Device to device' section (verified in DOM) with 'Export trip file' (testID local-export-btn) and 'Import trip file' (testID local-import-btn) both visible ✓. NEW ROBUSTNESS BUGS discovered while seeding localStorage: (a) Flights tab crashes with 'Cannot read properties of undefined (reading length)' when a flight row is missing the layovers array (Flights.tsx:119 reads f.layovers.length without optional chaining); (b) Flights tab crashes with 'Cannot read properties of undefined (reading bg)' when booking_status is missing (status.tsx:12-18 does map[status].bg without a default). Both wipe the whole tab through ErrorBoundary. MINOR i18n GAP: the 'Import a trip file' CTA on the home empty state is hard-coded English (index.tsx:209) — every other label is translated, so with Chinese selected the empty state mixes 中文 headings with an English button. Deprecated packages check: none introduced this round.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Flights tab", "issue": "Crashes with 'Cannot read properties of undefined (reading length)' when a flight has no layovers array. Reference: /app/frontend/src/components/tabs/Flights.tsx:119 uses f.layovers.length without ?? [] / optional chaining. Also line 121 dereferences .map. Any legacy or AI-imported flight missing layovers takes down the whole tab.", "testID": "tab-flights", "priority": "MEDIUM"},
+      {"component": "StatusBadge (used by Flights/Transport/Stays/etc.)", "issue": "Crashes with 'Cannot read properties of undefined (reading bg)' when booking_status is undefined/missing. Reference: /app/frontend/src/components/status.tsx:12-23 — map[status] is undefined and .bg throws.", "testID": "status-badge-*", "priority": "MEDIUM"},
+      {"component": "Home empty state CTA", "issue": "'Import a trip file' label is hard-coded English (index.tsx:209) — not run through t(). When user picks 简体中文 the empty state mixes Chinese headings with an English button. Every other empty-state string uses t().", "testID": "home-import-trip-btn", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "New Flight modal", "issues": ["'Departure date & time' and 'Arrival date & time' fields have NO testID — only input-airline and input-flight-number are testable. This blocks automated regression on the date-sort feature end-to-end. Please add testIDs like input-departure-datetime and input-arrival-datetime on the Pressable that opens the picker AND on the modal's date input."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_round8_test.py",
+    "/app/test_reports/pytest/round8_results.xml"
+  ],
+  "action_items": [
+    "Guard Flights.tsx line 119/121 with (f.layovers ?? []).length and (f.layovers ?? []).map(...) — same defensive read for transport layovers if present.",
+    "Make StatusBadge default missing/unknown status to 'not_booked' (or wrap map[status] || map.not_booked). Apply the same fix in status.tsx so a missing booking_status never crashes the tab.",
+    "Wrap 'Import a trip file' in t('home.importFile') and add the translations for zh/es/fr/de/ja.",
+    "Add testIDs to the date/time picker triggers inside New Flight / New Transport / New Stay modals: input-departure-datetime, input-arrival-datetime, input-checkin-datetime, input-checkout-datetime, input-activity-datetime — so the sort regression and future AI-import round trips can be exercised end-to-end from Playwright."
+  ],
+  "critical_code_review_comments": [
+    "server.py: /api/geocode and /api/reverse-geocode correctly forward Accept-Language to Nominatim (server.py:882 & 914). Good.",
+    "server.py: UNIVERSAL_SYSTEM prompt explicitly tells the LLM 'Today's year is {CURRENT_YEAR_HINT}. When the source omits the year, assume it is IN THE FUTURE' (server.py:1114+). Live test confirmed year>=2026 for 'March 15 at 09:30'.",
+    "server.py: parse-booking-multi accepts both new {items:[…]} and legacy single-object LLM output (server.py:1208-1213), and the legacy /api/ai/parse-booking now transparently maps {items:[…]} → first item (server.py:1310-1319). Backwards-compatible.",
+    "src/utils/sort.ts: sortByDate correctly bubbles undated items to the bottom via POSITIVE_INFINITY. dateKeys picks the earliest defined field per row.",
+    "src/components/tabs/Flights.tsx & status.tsx: NOT DEFENSIVE against partial rows. See action items — will crash on any row missing layovers or booking_status.",
+    "index.tsx:209 has a single hard-coded English string in an otherwise fully-translated screen."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_round8_test.py (new)",
+    "/app/test_reports/pytest/round8_results.xml (generated)"
+  ],
+  "success_rate": {"backend": "100% (29/29)", "frontend": "100% on all 6 requested flows (login order, empty state, language picker, language persist, date sort, share-sheet device-to-device). 2 side-bugs found while seeding data + 1 i18n miss."},
+  "seed_data_creation": "None persisted server-side. All frontend testing done in guest mode (localStorage only). Every trip/flight created was inside browser context and is discarded when the session ends.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend seed (user_demo_marketing + trip 9fbdeac7-a11c-4be2-a448-9c8560a1b6ad + Bearer demo_marketing_token_12345) untouched. Round 8 pytest lives at /app/backend/tests/backend_round8_test.py and hits localhost:8001 for geocode/parse endpoints (Nominatim + LLM real). Frontend note: New Flight / New Transport modals only expose testIDs for text fields (input-airline, input-flight-number, etc.) — the datetime picker trigger and modal have NO testID, so date-sensitive UI tests must currently seed localStorage directly (KEY='ts:localstore:v1'). When seeding a flight for Flights tab rendering, INCLUDE layovers:[] and booking_status:'booked' or the tab crashes — this is a real robustness bug already reported. Language picker uses testID lang-<code> where code is 'en'|'zh'|'es'|'fr'|'de'|'ja' (NOT 'zh-CN'). Header switches to Chinese instantly on tap; segmented tabs and settings labels also switch; persists via localStorage 'ts:lang'.",
+  "rca_of_issue": "N/A — feature acceptance pass. Two crash bugs found via defensive-data seeding are documented under frontend_issues.ui_bugs with exact file:line references and a one-line fix each."
+}

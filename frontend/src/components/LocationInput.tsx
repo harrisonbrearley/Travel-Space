@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TextInput, Pressable, ActivityIndicator, Platfo
 import Icon from "@react-native-vector-icons/material-design-icons";
 import { colors, radius, spacing } from "@/src/theme";
 import { api } from "@/src/api";
+import { useI18n, nominatimLang } from "@/src/i18n";
 import { MapPickerModal } from "./MapPickerModal";
 
 type Value = {
@@ -22,6 +23,7 @@ export function LocationInput({
   placeholder?: string;
   testID?: string;
 }) {
+  const { lang } = useI18n();
   const [suggestions, setSuggestions] = React.useState<{ display_name: string; latitude: number; longitude: number }[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [focus, setFocus] = React.useState(false);
@@ -35,7 +37,7 @@ export function LocationInput({
     }
     setLoading(true);
     try {
-      const r = await api.geocode(q);
+      const r = await api.geocode(q, nominatimLang(lang));
       setSuggestions(r.results || []);
     } catch {
       setSuggestions([]);

@@ -871,13 +871,21 @@ async def public_trip(share_id: str):
 # ============= GEOCODE / EXCHANGE =============
 
 @api_router.get("/geocode")
-async def geocode(q: str = Query(..., min_length=2, max_length=200), user: dict = CurrentUser):
+async def geocode(
+    q: str = Query(..., min_length=2, max_length=200),
+    lang: Optional[str] = Query(None, max_length=10),
+    user: dict = CurrentUser,
+):
+    headers = {"User-Agent": "TravelSpace/1.0 (travel-app)"}
+    if lang:
+        # Nominatim honours the Accept-Language header for localisation.
+        headers["Accept-Language"] = lang
     async with httpx.AsyncClient(timeout=15) as http:
         try:
             r = await http.get(
                 "https://nominatim.openstreetmap.org/search",
                 params={"q": q, "format": "json", "limit": 5, "addressdetails": 1},
-                headers={"User-Agent": "TravelSpace/1.0 (travel-app)"},
+                headers=headers,
             )
             r.raise_for_status()
             data = r.json()
@@ -893,15 +901,23 @@ async def geocode(q: str = Query(..., min_length=2, max_length=200), user: dict 
 
 
 @api_router.get("/reverse-geocode")
-async def reverse_geocode(lat: float, lon: float, user: dict = CurrentUser):
+async def reverse_geocode(
+    lat: float,
+    lon: float,
+    lang: Optional[str] = Query(None, max_length=10),
+    user: dict = CurrentUser,
+):
     if not (-90 <= lat <= 90) or not (-180 <= lon <= 180):
         raise HTTPException(400, "Bad coordinates")
+    headers = {"User-Agent": "TravelSpace/1.0 (travel-app)"}
+    if lang:
+        headers["Accept-Language"] = lang
     async with httpx.AsyncClient(timeout=15) as http:
         try:
             r = await http.get(
                 "https://nominatim.openstreetmap.org/reverse",
                 params={"lat": lat, "lon": lon, "format": "json"},
-                headers={"User-Agent": "TravelSpace/1.0 (travel-app)"},
+                headers=headers,
             )
             r.raise_for_status()
             data = r.json()
@@ -1046,23 +1062,41 @@ class ParsedBooking(BaseModel):
     ticket: dict = Field(default_factory=dict)
 
 
-UNIVERSAL_SYSTEM = """You are an assistant that extracts travel booking details from text or images (screenshots of booking confirmations).
+class ParsedItem(BaseModel):
+    category: Literal["flight", "transport", "stay", "attraction", "unknown"] = "unknown"
+    data: dict = Field(default_factory=dict)
+    ticket: dict = Field(default_factory=dict)
+    confidence: float = 0.0
 
-Classify the booking into one of these categories and extract fields.
+
+class ParsedBookingMulti(BaseModel):
+    items: List[ParsedItem] = Field(default_factory=list)
+
+
+CURRENT_YEAR_HINT = datetime.now().year
+
+
+UNIVERSAL_SYSTEM = f"""You are an assistant that extracts travel booking details from text or images (screenshots of booking confirmations, PDFs, or spreadsheets).
+
+There may be MULTIPLE bookings in one input (e.g. a spreadsheet listing several trains, or a screenshot of two hotel stays). Return every booking you can find as an array.
 
 Return ONLY a strict JSON object with this shape:
-{
-  "category": "flight" | "transport" | "stay" | "attraction" | "unknown",
-  "data": { ... category-specific fields ... },
-  "ticket": { "cost": number, "cost_currency": string (ISO 4217 3-letter code), "details": string, "link": string, "confirmation": string },
-  "confidence": number between 0 and 1
-}
+{{
+  "items": [
+    {{
+      "category": "flight" | "transport" | "stay" | "attraction" | "unknown",
+      "data": {{ ... category-specific fields ... }},
+      "ticket": {{ "cost": number, "cost_currency": string (ISO 4217 3-letter code), "details": string, "link": string, "confirmation": string }},
+      "confidence": number between 0 and 1
+    }}
+  ]
+}}
 
 Category-specific fields (all optional strings unless noted; missing = empty):
 
 flight:
   airline, flight_number, departure_location, departure_datetime (ISO 8601), arrival_location, arrival_datetime (ISO 8601),
-  layovers: array of { location, arrival_datetime, departure_datetime }
+  layovers: array of {{ location, arrival_datetime, departure_datetime }}
 
 transport:
   transport_type: one of "car","bus","train","ferry","other",
@@ -1075,13 +1109,121 @@ attraction:
   name, location, activity_datetime, website_link, notes
 
 Rules:
-- Use ISO 8601 for all dates/times, e.g. 2026-06-01T09:30.
+- Use ISO 8601 for all dates/times, e.g. 2027-06-01T09:30.
 - If the source shows only a date, use T00:00 for time.
+- CRUCIAL — YEAR DEFAULTING: Today's year is {CURRENT_YEAR_HINT}. When the source omits the year (e.g. "01/03" or "March 15"), assume it is IN THE FUTURE. Pick the next occurrence of that date/month:
+    * If the date without year is later than today when placed in the current year ({CURRENT_YEAR_HINT}), use {CURRENT_YEAR_HINT}.
+    * Otherwise use {CURRENT_YEAR_HINT + 1}.
+  Never emit a date in the past just because the year was missing.
 - Detect the currency carefully. Return `cost_currency` as an ISO 4217 code (USD, EUR, GBP, JPY, NOK, SEK, DKK, AUD, CAD, INR, CNY, KRW, THB, SGD, HKD, NZD, MXN, BRL, ZAR, CHF, etc.). Look for symbols ($, €, £, ¥, kr, ₹, ₩, ฿, R$, R, Fr) and words (dollars, euros, pounds, yen, kroner, krone, rupees, won). If unclear, use "USD".
 - Cost should be a number in the shown currency (no conversion).
-- IMPORTANT: Text-only category data must NEVER include HTML/script markup. Location, name, and other string fields are user-facing labels only.
+- Location, name, and other string fields are user-facing labels only — NEVER include HTML/script markup.
+- If only ONE booking exists, still wrap it in the `items` array (with one entry).
+- If you cannot detect any booking, return `{{"items": []}}`.
 - No code fences, no commentary. JSON only.
 """
+
+
+@api_router.post("/ai/parse-booking-multi", response_model=ParsedBookingMulti)
+async def parse_booking_multi(req: ParseBookingRequest, user: dict = CurrentUser):
+    """Multi-item extractor. Returns every booking detected in the input."""
+    await rate_limit_ai(user)
+    if not EMERGENT_LLM_KEY:
+        raise HTTPException(500, "LLM key not configured")
+    if not req.text and not req.image_base64:
+        raise HTTPException(400, "Provide text or image_base64")
+
+    mime = (req.mime or "").lower()
+
+    pdf_text = ""
+    if req.image_base64 and mime == "application/pdf":
+        try:
+            import io
+            from pypdf import PdfReader
+            b64 = req.image_base64.split(",", 1)[1] if req.image_base64.startswith("data:") else req.image_base64
+            raw = base64.b64decode(b64, validate=False)
+            if len(raw) > MAX_IMAGE_BYTES + 4 * 1024 * 1024:
+                raise HTTPException(413, "PDF too large")
+            reader = PdfReader(io.BytesIO(raw))
+            parts = []
+            for page in reader.pages[:20]:
+                try:
+                    parts.append(page.extract_text() or "")
+                except Exception:
+                    continue
+            pdf_text = "\n".join(parts).strip()[:18000]
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"pdf extract failed: {e}")
+            raise HTTPException(400, "Could not read PDF")
+        if not pdf_text:
+            raise HTTPException(400, "PDF has no extractable text. Try uploading a screenshot instead.")
+
+    if req.image_base64 and mime != "application/pdf":
+        b64 = req.image_base64.split(",", 1)[1] if req.image_base64.startswith("data:") else req.image_base64
+        try:
+            decoded_len = (len(b64) * 3) // 4
+        except Exception:
+            decoded_len = 0
+        if decoded_len > MAX_IMAGE_BYTES:
+            raise HTTPException(413, "Image too large (max 6 MB)")
+
+    from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+
+    chat = LlmChat(
+        api_key=EMERGENT_LLM_KEY,
+        session_id=f"parse-booking-multi-{uuid.uuid4()}",
+        system_message=UNIVERSAL_SYSTEM,
+    ).with_model("openai", "gpt-5.4")
+
+    if pdf_text:
+        text_prompt = (
+            (req.text.strip() + "\n\n" if req.text else "")
+            + "The following text was extracted from a booking PDF/spreadsheet. Extract EVERY booking you can find:\n\n"
+            + pdf_text
+        )
+        file_contents = []
+    else:
+        text_prompt = req.text or "Extract EVERY booking you can find in this image. Return them all in the items array."
+        file_contents = []
+        if req.image_base64:
+            b64 = req.image_base64.split(",", 1)[1] if req.image_base64.startswith("data:") else req.image_base64
+            file_contents.append(ImageContent(image_base64=b64))
+
+    msg = UserMessage(text=text_prompt, file_contents=file_contents) if file_contents else UserMessage(text=text_prompt)
+    try:
+        response = await chat.send_message(msg)
+    except Exception as e:
+        logger.error(f"parse-booking-multi LLM error: {e}")
+        raise HTTPException(500, f"LLM call failed: {e}")
+
+    text_out = response if isinstance(response, str) else str(response)
+    try:
+        parsed = _extract_json(text_out)
+    except Exception:
+        logger.error(f"parse-booking-multi bad JSON: {text_out[:400]}")
+        raise HTTPException(500, "Could not parse LLM response")
+
+    # Accept either the multi shape {items:[…]} OR a single legacy object.
+    raw_items = parsed.get("items")
+    if raw_items is None and parsed.get("category"):
+        raw_items = [parsed]
+    if not isinstance(raw_items, list):
+        raw_items = []
+
+    items: List[ParsedItem] = []
+    for it in raw_items:
+        if not isinstance(it, dict):
+            continue
+        items.append(ParsedItem(
+            category=it.get("category", "unknown") or "unknown",
+            data=it.get("data") or {},
+            ticket=it.get("ticket") or {},
+            confidence=float(it.get("confidence", 0) or 0),
+        ))
+
+    return ParsedBookingMulti(items=items)
 
 
 @api_router.post("/ai/parse-booking", response_model=ParsedBooking)
@@ -1164,6 +1306,17 @@ async def parse_booking(req: ParseBookingRequest, user: dict = CurrentUser):
     except Exception:
         logger.error(f"parse-booking bad JSON: {text_out[:400]}")
         raise HTTPException(500, "Could not parse LLM response")
+
+    # The system prompt now returns {items:[…]} (see UNIVERSAL_SYSTEM). This
+    # legacy single-item endpoint keeps working by returning the first item.
+    if "items" in parsed and isinstance(parsed["items"], list) and parsed["items"]:
+        first = parsed["items"][0] or {}
+        return ParsedBooking(
+            category=first.get("category", "unknown"),
+            data=first.get("data", {}) or {},
+            ticket=first.get("ticket", {}) or {},
+            confidence=float(first.get("confidence", 0)),
+        )
 
     return ParsedBooking(
         category=parsed.get("category", "unknown"),

@@ -15,9 +15,11 @@ export function StatusBadge({ status }: { status: BookingStatus }) {
     not_booked: { bg: "#F5E9E7", fg: colors.error, label: "Not Booked" },
     pay_on_arrival: { bg: "#F7EBD8", fg: colors.warning, label: "Pay on Arrival" },
   } as const;
-  const cfg = map[status];
+  // Fall back to `not_booked` styling when the API hands us an unexpected /
+  // missing status (older records, offline optimistic writes, imports).
+  const cfg = map[status] ?? map.not_booked;
   return (
-    <View style={[s.badge, { backgroundColor: cfg.bg }]} testID={`status-badge-${status}`}>
+    <View style={[s.badge, { backgroundColor: cfg.bg }]} testID={`status-badge-${status || "unknown"}`}>
       <Text style={[s.badgeText, { color: cfg.fg }]}>{cfg.label}</Text>
     </View>
   );

@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Icon from "@react-native-vector-icons/material-design-icons";
 
 import { useAuth } from "@/src/auth";
+import { useI18n } from "@/src/i18n";
 import { colors, radius, spacing } from "@/src/theme";
 
 const LOGO = require("../assets/images/travel-space-logo.png");
@@ -12,6 +13,7 @@ const LOGO = require("../assets/images/travel-space-logo.png");
 export default function LoginScreen() {
   const insets = useSafeAreaInsets();
   const { signIn, useLocal } = useAuth();
+  const { t } = useI18n();
   const [busy, setBusy] = React.useState(false);
 
   const doSignIn = async () => {
@@ -27,6 +29,7 @@ export default function LoginScreen() {
     if (busy) return;
     setBusy(true);
     try {
+      // eslint-disable-next-line react-hooks/rules-of-hooks
       await useLocal();
     } finally {
       setBusy(false);
@@ -37,16 +40,15 @@ export default function LoginScreen() {
     <View style={[s.root, { paddingTop: insets.top + spacing.xxxl, paddingBottom: insets.bottom + spacing.xl }]}>
       <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: spacing.xl }}>
         <Image source={LOGO} style={s.logo} contentFit="contain" />
-        <Text style={s.title}>Travel Space</Text>
-        <Text style={s.blurb}>
-          Travel itinerary made easy — bring all your bookings to one Travel Space.
-        </Text>
+        <Text style={s.title}>{t("home.title")}</Text>
+        <Text style={s.blurb}>{t("login.subtitle")}</Text>
       </View>
 
       <View style={{ paddingHorizontal: spacing.xl, gap: spacing.md }}>
+        {/* Guest mode is the recommended path — put it first, big. */}
         <Pressable
-          testID="google-signin-btn"
-          onPress={doSignIn}
+          testID="guest-btn"
+          onPress={doGuest}
           disabled={busy}
           style={[s.btn, busy && { opacity: 0.7 }]}
         >
@@ -54,25 +56,23 @@ export default function LoginScreen() {
             <ActivityIndicator color="#fff" />
           ) : (
             <>
-              <Icon name="google" size={20} color="#fff" />
-              <Text style={s.btnTxt}>Sign in with Google</Text>
+              <Icon name="rocket-launch-outline" size={20} color="#fff" />
+              <Text style={s.btnTxt}>{t("login.guest")}</Text>
             </>
           )}
         </Pressable>
 
         <Pressable
-          testID="guest-btn"
-          onPress={doGuest}
+          testID="google-signin-btn"
+          onPress={doSignIn}
           disabled={busy}
           style={[s.btnGhost, busy && { opacity: 0.6 }]}
         >
-          <Icon name="wifi-off" size={18} color={colors.onSurface} />
-          <Text style={s.btnGhostTxt}>Continue without signing in</Text>
+          <Icon name="google" size={18} color={colors.onSurface} />
+          <Text style={s.btnGhostTxt}>{t("login.signInGoogle")}</Text>
         </Pressable>
 
-        <Text style={s.tos}>
-          Guest trips are stored only on this device. Sign in to sync and share across devices.
-        </Text>
+        <Text style={s.tos}>{t("login.tos")}</Text>
       </View>
     </View>
   );

@@ -22,6 +22,7 @@ import {
 import { colors, radius, spacing } from "@/src/theme";
 import { Field, Input } from "@/src/components/form";
 import { FormModal, ListWrapper } from "@/src/components/tab-shell";
+import { sortByDate } from "@/src/utils/sort";
 import type { TabNav } from "@/app/trip/[id]";
 
 const LINK_TYPES: { key: LinkedType; label: string; icon: string }[] = [
@@ -69,10 +70,11 @@ export default function DocumentsTab({ trip, nav }: { trip: Trip; nav: TabNav })
   const [modal, setModal] = React.useState<Doc | null>(null);
   const [uploading, setUploading] = React.useState(false);
 
-  const { data: documents = [] } = useQuery<Doc[]>({
+  const { data: documentsRaw = [] } = useQuery<Doc[]>({
     queryKey: ["documents", trip.id],
     queryFn: () => api.list("documents", trip.id),
   });
+  const documents = React.useMemo(() => sortByDate(documentsRaw, ["created_at"]), [documentsRaw]);
   const { data: flights = [] } = useQuery<Flight[]>({ queryKey: ["flights", trip.id], queryFn: () => api.list("flights", trip.id) });
   const { data: transport = [] } = useQuery<Transport[]>({ queryKey: ["transport", trip.id], queryFn: () => api.list("transport", trip.id) });
   const { data: stays = [] } = useQuery<Stay[]>({ queryKey: ["stays", trip.id], queryFn: () => api.list("stays", trip.id) });

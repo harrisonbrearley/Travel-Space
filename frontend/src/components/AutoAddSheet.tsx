@@ -11,6 +11,17 @@ import Icon from "@react-native-vector-icons/material-design-icons";
 import { api, type Trip } from "@/src/api";
 import { colors, radius, spacing } from "@/src/theme";
 import { Input } from "@/src/components/form";
+import { useI18n } from "@/src/i18n";
+import { autoMatchAddress } from "@/src/utils/geoMatch";
+
+type Cat = "flight" | "transport" | "stay" | "attraction";
+
+// Snapshot of what was imported so we can surface a summary to the user.
+type ImportResult = {
+  ok: number;
+  addressWarnings: string[]; // human-readable "no match" lines
+  categories: Set<string>;
+};
 
 export function AutoAddSheet({
   visible,
@@ -25,6 +36,7 @@ export function AutoAddSheet({
 }) {
   const insets = useSafeAreaInsets();
   const qc = useQueryClient();
+  const { t } = useI18n();
   const [text, setText] = React.useState("");
   const [fileUri, setFileUri] = React.useState("");
   const [fileMime, setFileMime] = React.useState("");
@@ -74,8 +86,120 @@ export function AutoAddSheet({
     setFileName(a.name || "booking.pdf");
   };
 
+  // Resolves a raw address into { location, latitude, longitude }, auto-
+  // picking the top Nominatim hit if the score is high enough. Pushes a
+  // warning into `warnings` if we couldn't confidently match it.
+  const resolve = async (raw: string, warnings: string[]): Promise<{ location: string; latitude: number | null; longitude: number | null }> => {
+    if (!raw) return { location: "", latitude: null, longitude: null };
+    const res = await autoMatchAddress(raw);
+    if (res.unresolved) {
+      if (res.original) warnings.push(res.original);
+      // Keep the raw string so the user still sees what the AI extracted;
+      // they can tap it and manually pick from the dropdown.
+      return { location: raw, latitude: null, longitude: null };
+    }
+    return { location: res.geo.location, latitude: res.geo.latitude, longitude: res.geo.longitude };
+  };
+
+  const importOne = async (item: any, warnings: string[]): Promise<{ category: Cat | null; id: string | null }> => {
+    const cat = item.category as Cat | "unknown";
+    const data = item.data || {};
+    const ticket = item.ticket || {};
+
+    if (cat === "flight") {
+      const dep = await resolve(data.departure_location || "", warnings);
+      const arr = await resolve(data.arrival_location || "", warnings);
+      const layovers: any[] = [];
+      if (Array.isArray(data.layovers)) {
+        for (const l of data.layovers) {
+          const g = await resolve(l.location || "", warnings);
+          layovers.push({ ...l, location: g.location, latitude: g.latitude, longitude: g.longitude });
+        }
+      }
+      const created = await api.create("flights", trip.id, {
+        id: "", trip_id: "",
+        airline: data.airline || "",
+        flight_number: data.flight_number || "",
+        departure_location: dep.location,
+        departure_datetime: data.departure_datetime || "",
+        arrival_location: arr.location,
+        arrival_datetime: data.arrival_datetime || "",
+        layovers,
+        booking_status: "booked",
+        cost: parseFloat(ticket.cost) || 0,
+        cost_currency: ticket.cost_currency || trip.currency || "USD",
+        notes: ticket.details || "",
+        ticket_id: "",
+        departure_latitude: dep.latitude, departure_longitude: dep.longitude,
+        arrival_latitude: arr.latitude, arrival_longitude: arr.longitude,
+      });
+      return { category: "flight", id: created?.id || null };
+    }
+
+    if (cat === "transport") {
+      const dep = await resolve(data.departure_location || "", warnings);
+      const arr = await resolve(data.arrival_location || "", warnings);
+      const created = await api.create("transport", trip.id, {
+        id: "", trip_id: "",
+        transport_type: ["car", "bus", "train", "ferry", "other"].includes(data.transport_type) ? data.transport_type : "other",
+        departure_location: dep.location,
+        departure_datetime: data.departure_datetime || "",
+        arrival_location: arr.location,
+        arrival_datetime: data.arrival_datetime || "",
+        notes: data.notes || ticket.details || "",
+        booking_status: "booked",
+        cost: parseFloat(ticket.cost) || 0,
+        cost_currency: ticket.cost_currency || trip.currency || "USD",
+        ticket_id: "",
+        departure_latitude: dep.latitude, departure_longitude: dep.longitude,
+        arrival_latitude: arr.latitude, arrival_longitude: arr.longitude,
+      });
+      return { category: "transport", id: created?.id || null };
+    }
+
+    if (cat === "stay") {
+      const loc = await resolve(data.location || data.accommodation_name || "", warnings);
+      const created = await api.create("stays", trip.id, {
+        id: "", trip_id: "",
+        accommodation_name: data.accommodation_name || "",
+        location: loc.location,
+        checkin_datetime: data.checkin_datetime || "",
+        checkout_datetime: data.checkout_datetime || "",
+        booking_link: data.booking_link || ticket.link || "",
+        breakfast_included: !!data.breakfast_included,
+        dinner_included: !!data.dinner_included,
+        booking_status: "booked",
+        cost: parseFloat(ticket.cost) || 0,
+        cost_currency: ticket.cost_currency || trip.currency || "USD",
+        ticket_id: "",
+        latitude: loc.latitude, longitude: loc.longitude,
+      });
+      return { category: "stay", id: created?.id || null };
+    }
+
+    if (cat === "attraction") {
+      const loc = await resolve(data.location || data.name || "", warnings);
+      const created = await api.create("attractions", trip.id, {
+        id: "", trip_id: "",
+        name: data.name || "",
+        location: loc.location,
+        activity_datetime: data.activity_datetime || "",
+        website_link: data.website_link || ticket.link || "",
+        notes: data.notes || "",
+        booking_status: "booked",
+        cost: parseFloat(ticket.cost) || 0,
+        cost_currency: ticket.cost_currency || trip.currency || "USD",
+        ticket_id: "",
+        latitude: loc.latitude, longitude: loc.longitude,
+      });
+      return { category: "attraction", id: created?.id || null };
+    }
+
+    return { category: null, id: null };
+  };
+
   const run = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (): Promise<ImportResult> => {
       const body: any = {};
       if (text.trim()) body.text = text.trim();
       if (fileUri) {
@@ -85,108 +209,62 @@ export function AutoAddSheet({
       }
       if (!body.text && !body.image_base64) throw new Error("Paste text or add a screenshot / PDF first.");
 
-      const parsed = await api.parseBooking(body);
-      const cat = parsed.category;
-      const data = parsed.data || {};
-      const ticket = parsed.ticket || {};
+      const parsed = await api.parseBookingMulti(body);
+      const items = (parsed?.items || []).filter((it: any) => it && it.category && it.category !== "unknown");
+      if (items.length === 0) throw new Error(t("autoAdd.noneDetected"));
 
-      let created: any = null;
+      const warnings: string[] = [];
+      const categories = new Set<string>();
+      let ok = 0;
 
-      if (cat === "flight") {
-        created = await api.create("flights", trip.id, {
-          id: "", trip_id: "",
-          airline: data.airline || "",
-          flight_number: data.flight_number || "",
-          departure_location: data.departure_location || "",
-          departure_datetime: data.departure_datetime || "",
-          arrival_location: data.arrival_location || "",
-          arrival_datetime: data.arrival_datetime || "",
-          layovers: Array.isArray(data.layovers) ? data.layovers : [],
-          booking_status: "booked",
-          cost: parseFloat(ticket.cost) || 0,
-          cost_currency: ticket.cost_currency || trip.currency || "USD",
-          notes: ticket.details || "",
-          ticket_id: "",
-          departure_latitude: null, departure_longitude: null,
-          arrival_latitude: null, arrival_longitude: null,
-        });
-      } else if (cat === "transport") {
-        created = await api.create("transport", trip.id, {
-          id: "", trip_id: "",
-          transport_type: ["car", "bus", "train", "ferry", "other"].includes(data.transport_type) ? data.transport_type : "other",
-          departure_location: data.departure_location || "",
-          departure_datetime: data.departure_datetime || "",
-          arrival_location: data.arrival_location || "",
-          arrival_datetime: data.arrival_datetime || "",
-          notes: data.notes || ticket.details || "",
-          booking_status: "booked",
-          cost: parseFloat(ticket.cost) || 0,
-          cost_currency: ticket.cost_currency || trip.currency || "USD",
-          ticket_id: "",
-          departure_latitude: null, departure_longitude: null,
-          arrival_latitude: null, arrival_longitude: null,
-        });
-      } else if (cat === "stay") {
-        created = await api.create("stays", trip.id, {
-          id: "", trip_id: "",
-          accommodation_name: data.accommodation_name || "",
-          location: data.location || "",
-          checkin_datetime: data.checkin_datetime || "",
-          checkout_datetime: data.checkout_datetime || "",
-          booking_link: data.booking_link || ticket.link || "",
-          breakfast_included: !!data.breakfast_included,
-          dinner_included: !!data.dinner_included,
-          booking_status: "booked",
-          cost: parseFloat(ticket.cost) || 0,
-          cost_currency: ticket.cost_currency || trip.currency || "USD",
-          ticket_id: "",
-          latitude: null, longitude: null,
-        });
-      } else if (cat === "attraction") {
-        created = await api.create("attractions", trip.id, {
-          id: "", trip_id: "",
-          name: data.name || "",
-          location: data.location || "",
-          activity_datetime: data.activity_datetime || "",
-          website_link: data.website_link || ticket.link || "",
-          notes: data.notes || "",
-          booking_status: "booked",
-          cost: parseFloat(ticket.cost) || 0,
-          cost_currency: ticket.cost_currency || trip.currency || "USD",
-          ticket_id: "",
-          latitude: null, longitude: null,
-        });
-      } else {
-        throw new Error("Could not detect a booking category. Try a clearer image or paste text.");
+      for (const it of items) {
+        try {
+          const res = await importOne(it, warnings);
+          if (res.category && res.id) {
+            categories.add(res.category);
+            ok += 1;
+            const tkt = it.ticket || {};
+            if (tkt.cost || tkt.details || tkt.link || tkt.confirmation) {
+              await api.create("tickets", trip.id, {
+                id: "", trip_id: "",
+                link: tkt.link || "",
+                photo: "",
+                cost: parseFloat(tkt.cost) || 0,
+                cost_currency: tkt.cost_currency || trip.currency || "USD",
+                details: tkt.details || tkt.confirmation || "",
+                ticket_type: res.category,
+                linked_item_id: res.id,
+              });
+            }
+          }
+        } catch (e) {
+          // best-effort: skip failing item, keep going
+          console.warn("import item failed", e);
+        }
       }
-
-      // Optional: create linked ticket
-      if (created?.id && (ticket.cost || ticket.details || ticket.link || ticket.confirmation)) {
-        await api.create("tickets", trip.id, {
-          id: "", trip_id: "",
-          link: ticket.link || "",
-          photo: "",
-          cost: parseFloat(ticket.cost) || 0,
-          cost_currency: ticket.cost_currency || trip.currency || "USD",
-          details: ticket.details || ticket.confirmation || "",
-          ticket_type: cat,
-          linked_item_id: created.id,
-        });
-      }
-
-      return cat;
+      return { ok, addressWarnings: warnings, categories };
     },
-    onSuccess: (cat) => {
-      qc.invalidateQueries({ queryKey: ["flights", trip.id] });
-      qc.invalidateQueries({ queryKey: ["transport", trip.id] });
-      qc.invalidateQueries({ queryKey: ["stays", trip.id] });
-      qc.invalidateQueries({ queryKey: ["attractions", trip.id] });
-      qc.invalidateQueries({ queryKey: ["tickets", trip.id] });
+    onSuccess: (res) => {
+      // Invalidate every affected list
+      ["flights", "transport", "stays", "attractions", "tickets"].forEach((k) =>
+        qc.invalidateQueries({ queryKey: [k, trip.id] }),
+      );
       reset();
-      onDone(cat);
+      const primary = Array.from(res.categories)[0] || "flight";
+
+      // User-facing feedback
+      const okMsg = res.addressWarnings.length > 0
+        ? t("autoAdd.somefailed", { ok: res.ok, fail: res.addressWarnings.length })
+        : t("autoAdd.imported", { n: res.ok });
+      const warnText = res.addressWarnings.length
+        ? "\n\n• " + res.addressWarnings.slice(0, 5).join("\n• ") + (res.addressWarnings.length > 5 ? `\n… +${res.addressWarnings.length - 5}` : "")
+        : "";
+
+      Alert.alert(t("autoAdd.detected", { n: res.ok }), okMsg + warnText);
+      onDone(primary);
     },
     onError: (e: any) => {
-      Alert.alert("Could not import", e.message || "Try a different image or text.");
+      Alert.alert(t("autoAdd.parseFailed"), e?.message || t("autoAdd.parseFailedBody"));
     },
   });
 
@@ -200,26 +278,24 @@ export function AutoAddSheet({
           <Pressable onPress={closeReset} style={{ padding: spacing.sm }} testID="autoadd-close">
             <Icon name="close" size={24} color={colors.onSurface} />
           </Pressable>
-          <Text style={s.title}>Auto-import booking</Text>
+          <Text style={s.title}>{t("autoAdd.title")}</Text>
           <Pressable
             onPress={() => run.mutate()}
             disabled={run.isPending}
             style={[s.confirmBtn, run.isPending && { opacity: 0.6 }]}
             testID="autoadd-run"
           >
-            {run.isPending ? <ActivityIndicator color="#fff" size="small" /> : <Text style={s.confirmTxt}>Import</Text>}
+            {run.isPending ? <ActivityIndicator color="#fff" size="small" /> : <Text style={s.confirmTxt}>{t("autoAdd.import")}</Text>}
           </Pressable>
         </View>
 
         <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: insets.bottom + spacing.xl }} keyboardShouldPersistTaps="handled">
           <View style={s.intro}>
             <Icon name="auto-fix" size={22} color={colors.brandPrimary} />
-            <Text style={s.introTxt}>
-              Paste a booking confirmation (any airline, hotel, tour, transport) or upload a screenshot. It will be classified and added to the right tab, along with a linked ticket.
-            </Text>
+            <Text style={s.introTxt}>{t("autoAdd.intro")}</Text>
           </View>
 
-          <Text style={s.sectionTitle}>1. Add a screenshot or PDF</Text>
+          <Text style={s.sectionTitle}>{t("autoAdd.section1")}</Text>
           <Pressable testID="autoadd-pick" onPress={pickImage} style={s.imagePicker}>
             {fileUri && fileMime.startsWith("image/") ? (
               <Image source={{ uri: fileUri }} style={StyleSheet.absoluteFill} contentFit="cover" />
@@ -233,7 +309,7 @@ export function AutoAddSheet({
             ) : (
               <View style={{ alignItems: "center" }}>
                 <Icon name="image-plus" size={28} color={colors.muted} />
-                <Text style={{ color: colors.muted, marginTop: 4 }}>Pick a booking screenshot</Text>
+                <Text style={{ color: colors.muted, marginTop: 4 }}>{t("autoAdd.pickImage")}</Text>
               </View>
             )}
             {fileUri ? (
@@ -250,16 +326,16 @@ export function AutoAddSheet({
 
           <Pressable testID="autoadd-pick-pdf" onPress={pickPdf} style={s.pdfBtn}>
             <Icon name="file-pdf-box" size={18} color={colors.onSurface} />
-            <Text style={s.pdfBtnTxt}>Or attach a PDF booking</Text>
+            <Text style={s.pdfBtnTxt}>{t("autoAdd.pickPdf")}</Text>
           </Pressable>
 
-          <Text style={s.sectionTitle}>2. Or paste confirmation text</Text>
+          <Text style={s.sectionTitle}>{t("autoAdd.section2")}</Text>
           <Input
             testID="autoadd-text"
             value={text}
             onChangeText={setText}
             multiline
-            placeholder="Paste your flight / hotel / activity confirmation text here…"
+            placeholder={t("autoAdd.placeholder")}
           />
         </ScrollView>
       </KeyboardAvoidingView>

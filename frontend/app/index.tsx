@@ -6,25 +6,28 @@ import {
   FlatList,
   Pressable,
   RefreshControl,
+  Alert,
 } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Icon from "@react-native-vector-icons/material-design-icons";
 
 import { api, type Trip } from "@/src/api";
 import { colors, radius, spacing } from "@/src/theme";
 import { niceDate } from "@/src/components/form";
 import { useAuth } from "@/src/auth";
+import { useI18n } from "@/src/i18n";
 import { useSync } from "@/src/syncWorker";
 import { ImportGuestModal, shouldPromptImport } from "@/src/components/ImportGuestModal";
+import { pickTripBundle, importAsNewTrip, findMergeCandidate, mergeBundleIntoTrip } from "@/src/utils/tripExport";
 
-const TABS: { key: Trip["category"]; label: string }[] = [
-  { key: "upcoming", label: "Upcoming" },
-  { key: "past", label: "Past" },
-  { key: "wishlist", label: "Wishlist" },
+const TABS = [
+  { key: "upcoming" as const, labelKey: "home.tabs.upcoming" },
+  { key: "past" as const, labelKey: "home.tabs.past" },
+  { key: "wishlist" as const, labelKey: "home.tabs.wishlist" },
 ];
 
 const PLACEHOLDER = require("../assets/images/travel-space-cover.png");
@@ -33,13 +36,47 @@ export default function Home() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user, isLocal, signIn, signOut } = useAuth();
+  const { t } = useI18n();
   const sync = useSync();
+  const qc = useQueryClient();
   const [tab, setTab] = React.useState<Trip["category"]>("upcoming");
   const [importOpen, setImportOpen] = React.useState(false);
   const { data, isLoading, refetch, isRefetching } = useQuery<Trip[]>({
     queryKey: ["trips", isLocal ? "local" : "remote"],
     queryFn: api.listTrips,
   });
+
+  const handleImportTrip = React.useCallback(async () => {
+    try {
+      const bundle = await pickTripBundle();
+      const cand = await findMergeCandidate(bundle);
+      const invalidate = (id: string) => {
+        ["flights", "transport", "stays", "attractions", "tickets", "documents"].forEach((k) =>
+          qc.invalidateQueries({ queryKey: [k, id] }),
+        );
+        qc.invalidateQueries({ queryKey: ["trips", "local"] });
+        qc.invalidateQueries({ queryKey: ["trips", "remote"] });
+      };
+      if (cand) {
+        Alert.alert(
+          "Trip file received",
+          `You already have "${cand.trip.name}". Add as new copy or merge updates?`,
+          [
+            { text: "Cancel", style: "cancel" },
+            { text: "Add as new copy", onPress: async () => { const id = await importAsNewTrip(bundle); invalidate(id); router.push(`/trip/${id}`); } },
+            { text: "Merge updates", onPress: async () => { const n = await mergeBundleIntoTrip(bundle, cand.trip.id); invalidate(cand.trip.id); Alert.alert("Merged", `${n} item${n === 1 ? "" : "s"} merged.`); } },
+          ],
+        );
+      } else {
+        const id = await importAsNewTrip(bundle);
+        invalidate(id);
+        router.push(`/trip/${id}`);
+      }
+    } catch (e: any) {
+      if (e?.message === "cancelled") return;
+      Alert.alert("Could not import", e?.message === "invalid_schema" ? "This isn't a Travel Space trip file." : (e?.message || "Try another file."));
+    }
+  }, [qc, router]);
 
   // First-time import prompt for freshly signed-in users who still have guest data
   React.useEffect(() => {
@@ -59,9 +96,16 @@ export default function Home() {
       <View style={s.header}>
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
           <View style={{ flex: 1 }}>
-            <Text style={s.h1}>Travel Space</Text>
-            <Text style={s.subtitle}>Travel itinerary made easy — bring all your bookings to one Travel Space.</Text>
+            <Text style={s.h1}>{t("home.title")}</Text>
+            <Text style={s.subtitle}>{t("home.subtitle")}</Text>
           </View>
+          <Pressable
+            testID="settings-btn"
+            onPress={() => router.push("/settings")}
+            style={s.helpBtn}
+          >
+            <Icon name="cog-outline" size={22} color={colors.onSurface} />
+          </Pressable>
           <Pressable
             testID="help-btn"
             onPress={() => router.push("/help")}
@@ -81,16 +125,16 @@ export default function Home() {
 
       <View style={s.segmentedWrap}>
         <View style={s.segmented}>
-          {TABS.map((t) => {
-            const active = t.key === tab;
+          {TABS.map((tb) => {
+            const active = tb.key === tab;
             return (
               <Pressable
-                key={t.key}
-                testID={`trip-tab-${t.key}`}
-                onPress={() => setTab(t.key)}
+                key={tb.key}
+                testID={`trip-tab-${tb.key}`}
+                onPress={() => setTab(tb.key)}
                 style={[s.segment, active && s.segmentActive]}
               >
-                <Text style={[s.segmentText, active && s.segmentTextActive]}>{t.label}</Text>
+                <Text style={[s.segmentText, active && s.segmentTextActive]}>{t(tb.labelKey)}</Text>
               </Pressable>
             );
           })}
@@ -100,27 +144,29 @@ export default function Home() {
       {isLocal ? (
         <View style={s.guestBanner} testID="guest-banner">
           <Icon name="cloud-off-outline" size={14} color={colors.onBrandTertiary} />
-          <Text style={s.guestBannerTxt}>Guest mode · saved on this device only</Text>
+          <Text style={s.guestBannerTxt}>{t("home.guestMode")}</Text>
           <Pressable onPress={signIn} testID="guest-signin-btn">
-            <Text style={s.guestBannerLink}>Sign in</Text>
+            <Text style={s.guestBannerLink}>{t("common.signIn")}</Text>
           </Pressable>
         </View>
       ) : !sync.online ? (
         <View style={[s.guestBanner, { backgroundColor: colors.surfaceTertiary }]} testID="offline-banner">
           <Icon name="cloud-off-outline" size={14} color={colors.muted} />
           <Text style={[s.guestBannerTxt, { color: colors.muted }]}>
-            Offline · {sync.pending > 0 ? `${sync.pending} change${sync.pending === 1 ? "" : "s"} queued` : "changes will sync when you're back online"}
+            {sync.pending > 0
+              ? t("home.offlinePending", { n: sync.pending })
+              : t("home.offlineIdle")}
           </Text>
         </View>
       ) : sync.syncing || sync.pending > 0 ? (
         <View style={s.syncBanner} testID="sync-banner">
           <Icon name="cloud-sync-outline" size={14} color={colors.onBrandTertiary} />
           <Text style={s.guestBannerTxt}>
-            {sync.syncing ? `Syncing ${sync.pending} change${sync.pending === 1 ? "" : "s"}…` : `${sync.pending} change${sync.pending === 1 ? "" : "s"} waiting`}
+            {sync.syncing ? t("home.syncing", { n: sync.pending }) : t("home.waiting", { n: sync.pending })}
           </Text>
           {!sync.syncing && (
             <Pressable onPress={sync.triggerSync}>
-              <Text style={s.guestBannerLink}>Retry</Text>
+              <Text style={s.guestBannerLink}>{t("common.retry")}</Text>
             </Pressable>
           )}
         </View>
@@ -128,10 +174,10 @@ export default function Home() {
         <View style={[s.guestBanner, { backgroundColor: colors.surfaceTertiary }]} testID="failed-banner">
           <Icon name="alert-circle-outline" size={14} color={colors.warning} />
           <Text style={[s.guestBannerTxt, { color: colors.muted }]}>
-            {sync.failed.length} change{sync.failed.length === 1 ? "" : "s"} couldn't be applied
+            {t("home.failed", { n: sync.failed.length })}
           </Text>
           <Pressable onPress={sync.dismissFailed} testID="failed-dismiss">
-            <Text style={s.guestBannerLink}>Dismiss</Text>
+            <Text style={s.guestBannerLink}>{t("common.dismiss")}</Text>
           </Pressable>
         </View>
       ) : null}
@@ -152,8 +198,16 @@ export default function Home() {
           !isLoading ? (
             <View style={s.empty}>
               <Icon name="airplane" size={48} color={colors.muted} />
-              <Text style={s.emptyTitle}>No {tab} trips yet</Text>
-              <Text style={s.emptySub}>Tap the button below to plan your next escape.</Text>
+              <Text style={s.emptyTitle}>{t("home.empty", { tab: t(`home.tabs.${tab}`).toLowerCase() })}</Text>
+              <Text style={s.emptySub}>{t("home.emptySub")}</Text>
+              <Pressable
+                onPress={handleImportTrip}
+                style={s.importCta}
+                testID="home-import-trip-btn"
+              >
+                <Icon name="upload-outline" size={16} color={colors.brandPrimary} />
+                <Text style={s.importCtaTxt}>{t("home.importTrip")}</Text>
+              </Pressable>
             </View>
           ) : null
         }
@@ -174,6 +228,7 @@ export default function Home() {
 }
 
 function TripCard({ trip, onPress, currentUserId }: { trip: Trip; onPress: () => void; currentUserId?: string }) {
+  const { t } = useI18n();
   const dateRange =
     trip.start_date && trip.end_date
       ? `${niceDate(trip.start_date)} – ${niceDate(trip.end_date)}`
@@ -192,15 +247,15 @@ function TripCard({ trip, onPress, currentUserId }: { trip: Trip; onPress: () =>
     const startDay = new Date(start.getFullYear(), start.getMonth(), start.getDate());
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const days = Math.round((startDay.getTime() - today.getTime()) / 86400000);
-    if (days > 0) return `Leaves in ${days} day${days === 1 ? "" : "s"}`;
-    if (days === 0) return "Today's the day!";
+    if (days > 0) return t("home.leavesIn", { n: days });
+    if (days === 0) return t("home.todayIsTheDay");
     if (trip.end_date) {
       const end = new Date(trip.end_date);
       const endDay = new Date(end.getFullYear(), end.getMonth(), end.getDate());
-      if (today <= endDay) return "On the trip";
+      if (today <= endDay) return t("home.onTheTrip");
     }
     return null;
-  }, [trip.start_date, trip.end_date, trip.category]);
+  }, [trip.start_date, trip.end_date, trip.category, t]);
 
   return (
     <Pressable
@@ -373,6 +428,17 @@ const s = StyleSheet.create({
   },
   emptyTitle: { fontSize: 18, fontWeight: "600", color: colors.onSurface, marginTop: spacing.md },
   emptySub: { fontSize: 14, color: colors.muted, textAlign: "center", marginTop: 6 },
+  importCta: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: spacing.lg,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.pill,
+    backgroundColor: colors.brandTertiary,
+  },
+  importCtaTxt: { color: colors.onBrandTertiary, fontSize: 13, fontWeight: "600" },
   fab: {
     position: "absolute",
     right: 24,

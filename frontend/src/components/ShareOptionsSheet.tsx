@@ -1,11 +1,21 @@
 import React from "react";
 import { View, Text, StyleSheet, Modal, Pressable, Share, Switch, ScrollView, Platform, ActivityIndicator, Alert } from "react-native";
+import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Icon from "@react-native-vector-icons/material-design-icons";
 import { colors, radius, spacing } from "@/src/theme";
 import { api, isLocalMode, type Trip } from "@/src/api";
 import { exportTripPdf } from "@/src/exportPdf";
 import { useRates } from "@/src/currency";
+import {
+  buildTripBundle,
+  shareTripBundle,
+  pickTripBundle,
+  findMergeCandidate,
+  importAsNewTrip,
+  mergeBundleIntoTrip,
+} from "@/src/utils/tripExport";
+import { useQueryClient } from "@tanstack/react-query";
 
 type Opt = { key: string; label: string; icon: string; description?: string };
 
@@ -59,10 +69,13 @@ export function ShareOptionsSheet({
   trip: Trip;
 }) {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
+  const qc = useQueryClient();
   const [mode, setMode] = React.useState<Mode>("public");
   const [opts, setOpts] = React.useState<Record<string, boolean>>(DEFAULTS);
   const [exporting, setExporting] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
+  const [localBusy, setLocalBusy] = React.useState(false);
   const rates = useRates();
 
   React.useEffect(() => {
@@ -194,6 +207,71 @@ export function ShareOptionsSheet({
 
   const activeMode = MODES.find((m) => m.key === mode)!;
 
+  // ---- Device-to-device (no-server) sync ----
+  const doLocalExport = async () => {
+    setLocalBusy(true);
+    try {
+      const bundle = await buildTripBundle(trip.id);
+      await shareTripBundle(bundle);
+    } catch (e: any) {
+      Alert.alert("Could not export", e?.message || "Try again.");
+    } finally {
+      setLocalBusy(false);
+    }
+  };
+
+  const invalidateAll = (id: string) => {
+    ["flights", "transport", "stays", "attractions", "tickets", "documents"].forEach((k) =>
+      qc.invalidateQueries({ queryKey: [k, id] }),
+    );
+    qc.invalidateQueries({ queryKey: ["trips", "local"] });
+    qc.invalidateQueries({ queryKey: ["trips", "remote"] });
+    qc.invalidateQueries({ queryKey: ["trip", id] });
+  };
+
+  const doLocalImport = async () => {
+    setLocalBusy(true);
+    try {
+      const bundle = await pickTripBundle();
+      const candidate = await findMergeCandidate(bundle);
+      const openMerge = async () => {
+        const targetId = candidate!.trip.id;
+        const touched = await mergeBundleIntoTrip(bundle, targetId);
+        onClose();
+        invalidateAll(targetId);
+        Alert.alert("Merged", `${touched} item${touched === 1 ? "" : "s"} merged into "${candidate!.trip.name}".`);
+      };
+      const openReplace = async () => {
+        const newId = await importAsNewTrip(bundle);
+        onClose();
+        invalidateAll(newId);
+        setTimeout(() => router.push(`/trip/${newId}`), 100);
+      };
+      if (candidate) {
+        Alert.alert(
+          "Trip file received",
+          `You already have this trip ("${candidate.trip.name}"). How should it be added?`,
+          [
+            { text: "Cancel", style: "cancel" },
+            { text: "Add as new copy", onPress: openReplace },
+            { text: "Merge updates", onPress: openMerge },
+          ],
+        );
+      } else {
+        await openReplace();
+      }
+    } catch (e: any) {
+      if (e?.message === "cancelled") return;
+      if (e?.message === "invalid_schema" || e?.message === "invalid_json") {
+        Alert.alert("Not a trip file", "This file doesn't look like a Travel Space trip export.");
+      } else {
+        Alert.alert("Could not import", e?.message || "Try another file.");
+      }
+    } finally {
+      setLocalBusy(false);
+    }
+  };
+
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <View style={{ flex: 1, backgroundColor: colors.surface }}>
@@ -277,6 +355,49 @@ export function ShareOptionsSheet({
               </Text>
             </View>
           )}
+
+          {/* --- Device-to-device sync (works fully offline) --- */}
+          <Text style={[s.section, { marginTop: spacing.xl }]}>Device to device</Text>
+          <View style={s.intro}>
+            <Icon name="wifi-off" size={20} color={colors.brandPrimary} />
+            <Text style={s.introTxt}>
+              No internet? Export the trip as a file and hand it over via AirDrop, Bluetooth, WiFi, email or any messenger. The other person imports it in the same sheet.
+            </Text>
+          </View>
+
+          <Pressable
+            onPress={doLocalExport}
+            disabled={localBusy}
+            style={[s.modeCard, { marginTop: spacing.sm }, localBusy && { opacity: 0.6 }]}
+            testID="local-export-btn"
+          >
+            <View style={s.modeIcon}>
+              {localBusy ? <ActivityIndicator size="small" color={colors.brandPrimary} /> : <Icon name="download-outline" size={20} color={colors.brandPrimary} />}
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.modeLabel}>Export trip file</Text>
+              <Text style={s.modeDesc}>Save the whole trip (all tabs, all attachments) as a single file to share offline.</Text>
+            </View>
+            <Icon name="chevron-right" size={20} color={colors.muted} />
+          </Pressable>
+
+          <View style={{ height: spacing.sm }} />
+
+          <Pressable
+            onPress={doLocalImport}
+            disabled={localBusy}
+            style={[s.modeCard, localBusy && { opacity: 0.6 }]}
+            testID="local-import-btn"
+          >
+            <View style={s.modeIcon}>
+              <Icon name="upload-outline" size={20} color={colors.brandPrimary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.modeLabel}>Import trip file</Text>
+              <Text style={s.modeDesc}>Merge a trip a friend shared with you, or drop it in as a fresh copy.</Text>
+            </View>
+            <Icon name="chevron-right" size={20} color={colors.muted} />
+          </Pressable>
         </ScrollView>
 
         <View style={[s.footer, { paddingBottom: insets.bottom + spacing.md }]}>

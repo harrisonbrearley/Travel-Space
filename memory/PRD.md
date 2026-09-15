@@ -3,7 +3,16 @@
 ## Overview
 Single-user travel companion for planning trips (Upcoming/Past/Wishlist) with per-trip flights, transport, stays, attractions, tickets, budget, auto-generated itinerary and map, shareable read-only trip links, AI-powered booking imports, currency conversion, and one-tap PDF export.
 
-## Features
+- **Multi-language support (6 languages)**: In-app language picker (Settings → Language) with English, Chinese (Simplified), Spanish, French, German, Japanese. Nominatim geocoding uses the active language via `Accept-Language`, so addresses like "上海浦东国际机场" render as "Shanghai Pudong International Airport" for English users.
+- **Auto-sort by date**: Every list tab (Flights, Transport, Stays, Attractions, Tickets, Documents) is sorted chronologically. Undated items sink to the bottom. Tickets are sorted by the date of the item they're linked to.
+- **Multi-item AI import**: `/api/ai/parse-booking-multi` returns every booking in a single input (spreadsheet, multi-flight screenshot, PDF). AutoAddSheet imports them all in one go and shows a per-address warning list for entries that couldn't be resolved.
+- **AI year defaulting**: If the source omits the year for a date, the LLM assumes the next occurrence in the future (never in the past).
+- **Auto-match addresses**: AI-extracted addresses are auto-geocoded in the active language. Top hit is auto-picked if the token-overlap score ≥ 0.5; otherwise the raw text is kept and a "N couldn't be matched" hint is shown so the user picks manually.
+- **Full-offline, no-login-required**: Guest mode is the first, primary CTA on the login screen. All data stays in AsyncStorage. Google Sign-In is optional and used only for cloud backup + real-time collaboration.
+- **Device-to-device trip sync (offline)**: Share sheet exports the entire trip (all tabs, attachments, ticket links) as a `travelspace.trip.v1` JSON file that can be shared via AirDrop, Bluetooth, WiFi, email, or any messenger. Receiver imports via the same sheet or via a new "Import a trip file" CTA on the Home empty state; if the trip id already exists locally, they can either merge sub-items or add as a fresh copy.
+- **Erase-local from Settings**: Guests can wipe their local trip store in one tap without losing anything else.
+
+## Older features (already shipped)
 - **Branding**: Named "Travel Space" with a black-hole "TS" monogram app icon that pulls in travel category icons
 - Home shows the tagline "Travel itinerary made easy — bring all your bookings to one Travel Space." plus a help button that opens a full feature guide
 - Trips list (Upcoming/Past/Wishlist) with cover-photo cards, live countdown ("Leaves in X days"), and a Travel Space cover graphic as the default when no photo is uploaded
@@ -41,9 +50,10 @@ Single-user travel companion for planning trips (Upcoming/Past/Wishlist) with pe
 - `GET  /api/invites/{token}` public preview
 - `POST /api/invites/{token}/accept` (auth) → for collab: adds user to collaborators; for copy: returns new trip_id
 - `DELETE /api/trips/{id}/collaborators/{user_id}` owner-revoke or self-leave
-- `GET /api/geocode?q=` (Nominatim proxy)
-- `GET /api/reverse-geocode?lat=&lon=`
 - `GET /api/exchange-rates?base=USD` (6-hour cache)
 - `POST /api/ai/parse-flight` (text-only, legacy)
-- `POST /api/ai/parse-booking` (text, image, or PDF via pypdf; currency-aware)
+- `POST /api/ai/parse-booking` (text, image, or PDF via pypdf; currency-aware) — legacy single-item shape
+- `POST /api/ai/parse-booking-multi` (text, image, or PDF; returns `{items: […]}` — one entry per booking detected)
+- `GET /api/geocode?q=&lang=` (Nominatim proxy; `lang` forwards to `Accept-Language`)
+- `GET /api/reverse-geocode?lat=&lon=&lang=`
 - `GET /api/public/trips/{share_id}` (public read-only feed)

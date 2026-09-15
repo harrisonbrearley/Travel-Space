@@ -11,6 +11,7 @@ import { FormModal, ListWrapper } from "@/src/components/tab-shell";
 import { LocationInput } from "@/src/components/LocationInput";
 import { CostInput } from "@/src/components/CostInput";
 import { formatMoney } from "@/src/currency";
+import { sortByDate, dateKeys } from "@/src/utils/sort";
 import type { TabNav } from "@/app/trip/[id]";
 
 const empty = (trip_id: string, currency: string): Attraction => ({
@@ -23,7 +24,8 @@ export default function AttractionsTab({ trip, nav }: { trip: Trip; nav: TabNav 
   const qc = useQueryClient();
   const [modal, setModal] = React.useState<Attraction | null>(null);
 
-  const { data = [] } = useQuery<Attraction[]>({ queryKey: ["attractions", trip.id], queryFn: () => api.list("attractions", trip.id) });
+  const { data: rawData = [] } = useQuery<Attraction[]>({ queryKey: ["attractions", trip.id], queryFn: () => api.list("attractions", trip.id) });
+  const data = React.useMemo(() => sortByDate(rawData, [...dateKeys.attractions]), [rawData]);
   const { data: tickets = [] } = useQuery<Ticket[]>({ queryKey: ["tickets", trip.id], queryFn: () => api.list("tickets", trip.id) });
 
   const save = useMutation({
@@ -103,7 +105,7 @@ export default function AttractionsTab({ trip, nav }: { trip: Trip; nav: TabNav 
               />
             </Field>
             <Field label="Date & time">
-              <DateTimeInput value={modal.activity_datetime} onChange={(v) => setModal({ ...modal, activity_datetime: v })} />
+              <DateTimeInput testID="input-activity-datetime" value={modal.activity_datetime} onChange={(v) => setModal({ ...modal, activity_datetime: v })} />
             </Field>
             <Field label="Website link">
               <Input value={modal.website_link} onChangeText={(v) => setModal({ ...modal, website_link: v })} placeholder="https://..." keyboardType="url" autoCapitalize="none" />

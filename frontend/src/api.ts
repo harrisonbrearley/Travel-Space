@@ -270,10 +270,15 @@ export const api = {
     req("/ai/parse-flight", { method: "POST", body: JSON.stringify({ text }) }),
   parseBooking: (body: { text?: string; image_base64?: string; mime?: string }) =>
     req("/ai/parse-booking", { method: "POST", body: JSON.stringify(body) }),
+  parseBookingMulti: (body: { text?: string; image_base64?: string; mime?: string }) =>
+    req("/ai/parse-booking-multi", { method: "POST", body: JSON.stringify(body) }),
 
-  // Geo — remote only
-  geocode: (q: string) => req(`/geocode?q=${encodeURIComponent(q)}`),
-  reverseGeocode: (lat: number, lon: number) => req(`/reverse-geocode?lat=${lat}&lon=${lon}`),
+  // Geo — remote only. Accept-Language lets Nominatim return names in the
+  // caller's language when possible.
+  geocode: (q: string, lang?: string) =>
+    req(`/geocode?q=${encodeURIComponent(q)}${lang ? `&lang=${lang}` : ""}`),
+  reverseGeocode: (lat: number, lon: number, lang?: string) =>
+    req(`/reverse-geocode?lat=${lat}&lon=${lon}${lang ? `&lang=${lang}` : ""}`),
 
   // Public (no auth)
   publicTrip: (shareId: string) => req(`/public/trips/${shareId}`),

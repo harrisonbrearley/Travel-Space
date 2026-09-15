@@ -13,6 +13,7 @@ import { Field, Input } from "@/src/components/form";
 import { FormModal, ListWrapper } from "@/src/components/tab-shell";
 import { CostInput } from "@/src/components/CostInput";
 import { formatMoney } from "@/src/currency";
+import { sortByDate } from "@/src/utils/sort";
 import type { TabNav } from "@/app/trip/[id]";
 
 const TYPES: { key: Ticket["ticket_type"]; label: string; icon: string }[] = [
@@ -34,11 +35,27 @@ export default function TicketsTab({ trip, nav }: { trip: Trip; nav: TabNav }) {
   const qc = useQueryClient();
   const [modal, setModal] = React.useState<Ticket | null>(null);
 
-  const { data: tickets = [] } = useQuery<Ticket[]>({ queryKey: ["tickets", trip.id], queryFn: () => api.list("tickets", trip.id) });
+  const { data: ticketsRaw = [] } = useQuery<Ticket[]>({ queryKey: ["tickets", trip.id], queryFn: () => api.list("tickets", trip.id) });
   const { data: flights = [] } = useQuery<Flight[]>({ queryKey: ["flights", trip.id], queryFn: () => api.list("flights", trip.id) });
   const { data: transport = [] } = useQuery<Transport[]>({ queryKey: ["transport", trip.id], queryFn: () => api.list("transport", trip.id) });
   const { data: stays = [] } = useQuery<Stay[]>({ queryKey: ["stays", trip.id], queryFn: () => api.list("stays", trip.id) });
   const { data: attractions = [] } = useQuery<Attraction[]>({ queryKey: ["attractions", trip.id], queryFn: () => api.list("attractions", trip.id) });
+
+  // Sort tickets by the date of the item they're linked to. Unlinked
+  // tickets sink to the bottom.
+  const tickets = React.useMemo(() => {
+    const dated = ticketsRaw.map((tk) => {
+      let when = "";
+      if (tk.linked_item_id) {
+        if (tk.ticket_type === "flight") when = flights.find((x) => x.id === tk.linked_item_id)?.departure_datetime || "";
+        else if (tk.ticket_type === "transport") when = transport.find((x) => x.id === tk.linked_item_id)?.departure_datetime || "";
+        else if (tk.ticket_type === "stay") when = stays.find((x) => x.id === tk.linked_item_id)?.checkin_datetime || "";
+        else if (tk.ticket_type === "attraction") when = attractions.find((x) => x.id === tk.linked_item_id)?.activity_datetime || "";
+      }
+      return { ...tk, __sort_when: when };
+    });
+    return sortByDate(dated, ["__sort_when"]);
+  }, [ticketsRaw, flights, transport, stays, attractions]);
 
   const save = useMutation({
     mutationFn: async (t: Ticket) => (t.id ? api.update("tickets", t.id, t) : api.create("tickets", trip.id, t)),
