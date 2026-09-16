@@ -1,5 +1,6 @@
 import React from "react";
 import { View, Text, StyleSheet, Modal, Pressable, ScrollView, Platform, ActivityIndicator, Alert, TextInput, Dimensions } from "react-native";
+import * as ImagePicker from "expo-image-picker";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Icon from "@react-native-vector-icons/material-design-icons";
 import QRCode from "react-native-qrcode-svg";
@@ -8,6 +9,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import { colors, radius, spacing } from "@/src/theme";
 import { buildTripBundle, findMergeCandidate, importAsNewTrip, mergeBundleIntoTrip, type TripBundle } from "@/src/utils/tripExport";
 import { encodeTripToQr, decodeQrToBundle } from "@/src/utils/qrHandoff";
+import { decodeQrFromUri } from "@/src/utils/qrDecodeImage";
 
 type Mode = "export" | "scan";
 
@@ -114,6 +116,40 @@ export function QrHandoffSheet({
     }
   };
 
+  // Upload a photo of a QR code (screenshot, photo of another phone, etc.).
+  // Web decodes via canvas + jsqr. Native devices should use the camera
+  // scanner in the CameraView above, but this also works there.
+  const importFromImage = async () => {
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert("Permission needed", "Allow photo access to import a QR image.");
+        return;
+      }
+      const res = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 1,
+        base64: false,
+      });
+      if (res.canceled || !res.assets?.[0]) return;
+      setBusy(true);
+      const text = await decodeQrFromUri(res.assets[0].uri);
+      if (!text) {
+        Alert.alert(
+          "No QR found",
+          "Couldn't find a QR code in that image. Try a clearer shot, or paste the code below.",
+        );
+        return;
+      }
+      const bundle = decodeQrToBundle(text);
+      await handleBundle(bundle);
+    } catch (e: any) {
+      Alert.alert("Could not read QR", e?.message || "Try another image.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const qrSize = Math.min(Dimensions.get("window").width - spacing.xl * 2, 320);
 
   return (
@@ -190,12 +226,28 @@ export function QrHandoffSheet({
               ) : (
                 <View style={s.warnBox}>
                   <Icon name="information-outline" size={22} color={colors.brandPrimary} />
-                  <Text style={s.warnTitle}>Scanning on the web</Text>
+                  <Text style={s.warnTitle}>Web camera scan isn&apos;t supported</Text>
                   <Text style={s.warnBody}>
-                    Web browsers don&apos;t let apps scan the camera reliably. Paste the QR contents below instead, or use the trip file share on both devices.
+                    Upload a screenshot / photo of the QR below, or paste its contents. On phones you can also install this app as a PWA and use the camera scanner in a native build.
                   </Text>
                 </View>
               )}
+
+              <Pressable
+                onPress={importFromImage}
+                disabled={busy}
+                style={[s.primaryBtn, busy && { opacity: 0.6 }, { marginBottom: spacing.md }]}
+                testID="qr-upload-btn"
+              >
+                {busy ? (
+                  <ActivityIndicator color={colors.onBrandPrimary} size="small" />
+                ) : (
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                    <Icon name="image-multiple-outline" size={18} color={colors.onBrandPrimary} />
+                    <Text style={s.primaryBtnTxt}>Upload QR image</Text>
+                  </View>
+                )}
+              </Pressable>
 
               <Text style={s.section}>Or paste the QR contents</Text>
               <TextInput
